@@ -380,9 +380,9 @@ class ServiceController(WSGIContext):
     """
     def __init__(self, env, app, account_name, token, **kwargs):
         WSGIContext.__init__(self, app)
-        self.account = account_name.split(':')[0]
+        self.account = unquote(account_name)
         env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = '/v1/AUTH_%s' % self.account
+        env['PATH_INFO'] = '/v1/AUTH_%s' % account_name
 
     def GET(self, env, start_response):
         """
@@ -433,7 +433,7 @@ class BucketController(WSGIContext):
         self.container_name = unquote(container_name)
         self.account_name = unquote(account_name)
         env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = '/v1/%s/%s' % (account_name, container_name)
+        env['PATH_INFO'] = '/v1/AUTH_%s/%s' % (account_name, container_name)
         conf = kwargs.get('conf', {})
         self.location = conf.get('location', 'US')
 
@@ -702,8 +702,8 @@ class ObjectController(WSGIContext):
         self.account_name = unquote(account_name)
         self.container_name = unquote(container_name)
         env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = '/v1/%s/%s/%s' % (account_name, container_name,
-                                             object_name)
+        env['PATH_INFO'] = '/v1/AUTH_%s/%s/%s' % (account_name, container_name,
+                                                  object_name)
 
     def GETorHEAD(self, env, start_response):
         if 'QUERY_STRING' in env:
@@ -885,7 +885,7 @@ class Swift3Middleware(object):
             return get_err_response('AccessDenied')(env, start_response)
 
         try:
-            account, signature = info.rsplit(':', 1)
+            account, signature = info.split(':', 1)
         except:
             return get_err_response('InvalidArgument')(env, start_response)
 
