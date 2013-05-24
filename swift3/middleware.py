@@ -58,6 +58,7 @@ from xml.sax.saxutils import escape as xml_escape
 import urlparse
 from xml.dom.minidom import parseString
 
+import simplexml
 from simplejson import loads
 import email.utils
 import datetime
@@ -379,37 +380,47 @@ class ServiceController(WSGIContext):
     """
     def __init__(self, env, app, account_name, token, **kwargs):
         WSGIContext.__init__(self, app)
+        self.account = account_name.split(':')[0]
         env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = '/v1/%s' % account_name
+        env['PATH_INFO'] = '/v1/AUTH_%s' % self.account
 
     def GET(self, env, start_response):
         """
         Handle GET Service request
         """
         env['QUERY_STRING'] = 'format=json'
+        print env
         body_iter = self._app_call(env)
         status = self._get_status_int()
+        print body_iter, status
 
-        if status != HTTP_OK:
+        if not is_success(status):
             if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 return get_err_response('AccessDenied')
             else:
                 return get_err_response('InvalidURI')
 
-        containers = loads(''.join(list(body_iter)))
-        # we don't keep the creation time of a backet (s3cmd doesn't
-        # work without that) so we use something bogus.
-        body = '<?xml version="1.0" encoding="UTF-8"?>' \
-               '<ListAllMyBucketsResult ' \
-               'xmlns="http://doc.s3.amazonaws.com/2006-03-01">' \
-               '<Buckets>%s</Buckets>' \
-               '</ListAllMyBucketsResult>' \
-               % ("".join(['<Bucket><Name>%s</Name><CreationDate>'
-                           '2009-02-03T16:45:09.000Z</CreationDate></Bucket>'
-                           % xml_escape(i['name']) for i in containers]))
-        resp = Response(status=HTTP_OK, content_type='application/xml',
-                        body=body)
-        return resp
+        if status == HTTP_OK:
+            containers = loads(''.join(list(body_iter)))
+            # we don't keep the creation time of a backet (s3cmd doesn't
+            # work without that) so we use something bogus.
+            body = '<?xml version="1.0" encoding="UTF-8"?>' \
+                   '<ListAllMyBucketsResult ' \
+                   'xmlns="http://doc.s3.amazonaws.com/2006-03-01">' \
+                   '<Buckets>%s</Buckets>' \
+                   '</ListAllMyBucketsResult>' \
+                   % ("".join(['<Bucket><Name>%s</Name><CreationDate>'
+                               '2009-02-03T16:45:09.000Z</CreationDate></Bucket>'
+                               % xml_escape(i['name']) for i in containers]))
+            resp = Response(status=HTTP_OK, content_type='application/xml',
+                            body=body)
+            return resp
+        elif status == HTTP_NO_CONTENT:
+            data = {'ListAllMyBucketsResult':{'Owner':{'ID':self.account,'DisplayName':self.account},'Buckets':''}}
+            body = simplexml.dumps(data)
+            return Response(status=HTTP_OK, content_type='application/xml', body=body)
+        else:
+            raise ValueError('service.GET:unknown swift proxy response status')
 
 
 class BucketController(WSGIContext):
@@ -852,7 +863,7 @@ class Swift3Middleware(object):
     def handle_request(self, env, start_response):
         req = Request(env)
         self.logger.debug('Calling Swift3 Middleware')
-	self.logger.debug(req.__dict__)
+        self.logger.debug(req.__dict__)
 
         if 'AWSAccessKeyId' in req.params:
             try:
