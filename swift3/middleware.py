@@ -57,7 +57,7 @@ import base64
 from xml.sax.saxutils import escape as xml_escape
 import urlparse
 from xml.dom.minidom import parseString
-from collection import defaultdict
+from collections import defaultdict
 
 import simplexml
 from simplejson import loads
@@ -532,9 +532,6 @@ class BucketController(WSGIContext):
         """
         Handle PUT Bucket request
         """
-        # TODO add canned
-        # TODO add explictly
-
         # checking params available
         AMZ_ACL = set(['HTTP_X_AMZ_GRANT_READ',
                        'HTTP_X_AMZ_GRANT_WRITE',
@@ -546,8 +543,9 @@ class BucketController(WSGIContext):
         if not args:
             # to create a new one
             if not is_unique(self.container_name):
-                # return a error response
+                # TODO return a error response
                 return
+
             if 'HTTP_X_AMZ_ACL' in env:
                 amz_acl = env['HTTP_X_AMZ_ACL']
                 translated_acl = swift_acl_translate(canned=amz_acl)
@@ -569,7 +567,7 @@ class BucketController(WSGIContext):
             body_iter = self._app_call(env)
             status = self._get_status_int()
 
-            if status != HTTP_CREATED and status != HTTP_NO_CONTENT:
+            if status != HTTP_CREATED:
                 if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
                 elif status == HTTP_ACCEPTED:
@@ -585,8 +583,15 @@ class BucketController(WSGIContext):
         if len(args) > 1:
             # TODO return kindof error status
             print 'sb'
+
+        # now args only 1
+        # TODO post to swift proxy
         action = args.keys().pop()
         if action == 'acl':
+            # TODO this is quite different from swift acl and can't be tested
+            # check body access permissions
+            # check header canner
+            # check header access permissions
             pass
         elif action == 'cors':
             pass
@@ -911,6 +916,7 @@ class Swift3Middleware(object):
         except ValueError:
             return get_err_response('InvalidURI')(env, start_response)
 
+        print controller
         if 'Date' in req.headers:
             date = email.utils.parsedate(req.headers['Date'])
             if date is None and 'Expires' in req.params:
