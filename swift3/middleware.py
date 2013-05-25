@@ -57,6 +57,7 @@ import base64
 from xml.sax.saxutils import escape as xml_escape
 import urlparse
 from xml.dom.minidom import parseString
+from collection import defaultdict
 
 import simplexml
 from simplejson import loads
@@ -301,52 +302,41 @@ def canonical_string(req):
 
     return buf + path
 
-def swift_acl_translate(acl, group='', user='', xml=False):
+
+def keyvalue2dict(value):
+    valued = defaultdict(list)
+    for _pair in value.split(','):
+        _key, _value = _pair.split('=')
+        valued[_key.strip()].append(_value.strip())
+    return dict(valued)
+
+
+
+def swift_acl_translate(canned=None, acl=None):
     """
     Takes an S3 style ACL and returns a list of header/value pairs that
     implement that ACL in Swift, or "Unsupported" if there isn't a way to do
     that yet.
     """
-    swift_acl = {}
-    swift_acl['public-read'] = [['HTTP_X_CONTAINER_READ', '.r:*,.rlistings']]
-    # Swift does not support public write:
-    # https://answers.launchpad.net/swift/+question/169541
-    swift_acl['public-read-write'] = [['HTTP_X_CONTAINER_WRITE', '.r:*'],
-                                      ['HTTP_X_CONTAINER_READ',
-                                       '.r:*,.rlistings']]
+    if canned == acl == None or (canned is not None and acl is not None):
+        raise ValueError('One and only one kind of acl is supported')
 
-    #TODO: if there's a way to get group and user, this should work for
-    # private:
-    #swift_acl['private'] = [['HTTP_X_CONTAINER_WRITE',  group + ':' + user], \
-    #                  ['HTTP_X_CONTAINER_READ', group + ':' + user]]
-    swift_acl['private'] = [['HTTP_X_CONTAINER_WRITE', '.'],
-                            ['HTTP_X_CONTAINER_READ', '.']]
-    if xml:
-        # We are working with XML and need to parse it
-        dom = parseString(acl)
-        acl = 'unknown'
-        for grant in dom.getElementsByTagName('Grant'):
-            permission = grant.getElementsByTagName('Permission')[0]\
-                .firstChild.data
-            grantee = grant.getElementsByTagName('Grantee')[0]\
-                .getAttributeNode('xsi:type').nodeValue
-            if permission == "FULL_CONTROL" and grantee == 'CanonicalUser' and\
-                    acl != 'public-read' and acl != 'public-read-write':
-                acl = 'private'
-            elif permission == "READ" and grantee == 'Group' and\
-                    acl != 'public-read-write':
-                acl = 'public-read'
-            elif permission == "WRITE" and grantee == 'Group':
-                acl = 'public-read-write'
-            else:
-                acl = 'unsupported'
+    if canned:
+        swift_acl = defaultdict(list)
+        canned_acl = ['bucket-owner-read', 'bucket-owner-full-control',
+                      'public-read', 'public-read-write', 'private',
+                      'authenticated-read']
+        swift_acl['authenticated-read'] = [['HTTP_X_CONTAINER_READ', '.r:*,.rlistings']]
+        swift_acl['private'] = [['HTTP_X_CONTAINER_WRITE', '.'],
+                                ['HTTP_X_CONTAINER_READ', '.']]
+        if canned in canned_acl:
+            return swift_acl[canned]
 
-    if acl == 'authenticated-read':
-        return "Unsupported"
-    elif acl not in swift_acl:
-        return "InvalidArgument"
-
-    return swift_acl[acl]
+    if acl:
+        swift_acl = defaultdict(list)
+        read = acl['read']['userid'] + acl['read']['user'] + acl['full']['userid'] + acl['full']['user']
+        write = acl['write']['userid'] + acl['write']['user'] + acl['full']['userid'] + acl['full']['user']
+        return [['HTTP_X_CONTAINER_READ', read],['HTTP_X_CONTAINER_WRITE', write]]
 
 
 def validate_bucket_name(name):
@@ -373,6 +363,10 @@ def validate_bucket_name(name):
     else:
         return True
 
+
+def is_unique(container):
+    # TODO checking ...
+    return True
 
 class ServiceController(WSGIContext):
     """
@@ -538,62 +532,84 @@ class BucketController(WSGIContext):
         """
         Handle PUT Bucket request
         """
-        if 'HTTP_X_AMZ_ACL' in env:
-            amz_acl = env['HTTP_X_AMZ_ACL']
-            # Translate the Amazon ACL to something that can be
-            # implemented in Swift, 501 otherwise. Swift uses POST
-            # for ACLs, whereas S3 uses PUT.
-            del env['HTTP_X_AMZ_ACL']
-            if 'QUERY_STRING' in env:
-                del env['QUERY_STRING']
+        # TODO add canned
+        # TODO add explictly
 
-            translated_acl = swift_acl_translate(amz_acl)
-            if translated_acl == 'Unsupported':
-                return get_err_response('Unsupported')
-            elif translated_acl == 'InvalidArgument':
-                return get_err_response('InvalidArgument')
+        # checking params available
+        AMZ_ACL = set(['HTTP_X_AMZ_GRANT_READ',
+                       'HTTP_X_AMZ_GRANT_WRITE',
+                       'HTTP_X_AMZ_GRANT_READ_ACP',
+                       'HTTP_X_AMZ_GRANT_WRITE_ACP',
+                       'HTTP_X_AMZ_GRANT_FULL_CONTROL'])
+        qs = env.get('QUERY_STRING', '')
+        args = urlparse.parse_qs(qs, 1)
+        if not args:
+            # to create a new one
+            if not is_unique(self.container_name):
+                # return a error response
+                return
+            if 'HTTP_X_AMZ_ACL' in env:
+                amz_acl = env['HTTP_X_AMZ_ACL']
+                translated_acl = swift_acl_translate(canned=amz_acl)
+                for header, value in translated_acl:
+                    env[header] = value
+            elif AMZ_ACL & set(env.keys()):
+                acld = dict()
+                if 'HTTP_X_AMZ_GRANT_READ' in env.keys():
+                    acld['read'] = keyvalue2dict(env['HTTP_X_AMZ_GRANT_READ'])
+                if 'HTTP_X_AMZ_GRANT_WRITE' in env.keys():
+                    acld['write'] = keyvalue2dict(env['HTTP_X_AMZ_GRANT_WRITE'])
+                if 'HTTP_X_AMZ_GRANT_FULL_CONTROL' in env.keys():
+                    acld['full'] = keyvalue2dict(env['HTTP_X_AMZ_GRANT_FULL_CONTROL'])
+                translated_acl = swift_acl_translate(acl=acld)
+                for header, value in translated_acl:
+                    env[header] = value
 
-            for header, acl in translated_acl:
-                env[header] = acl
+            # modify env put to swift
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
 
-        if 'CONTENT_LENGTH' in env:
-            content_length = env['CONTENT_LENGTH']
-            try:
-                content_length = int(content_length)
-            except (ValueError, TypeError):
-                return get_err_response('InvalidArgument')
-            if content_length < 0:
-                return get_err_response('InvalidArgument')
+            if status != HTTP_CREATED and status != HTTP_NO_CONTENT:
+                if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                elif status == HTTP_ACCEPTED:
+                    return get_err_response('BucketAlreadyExists')
+                else:
+                    return get_err_response('InvalidURI')
 
-        if 'QUERY_STRING' in env:
-            args = dict(urlparse.parse_qsl(env['QUERY_STRING'], 1))
-            if 'acl' in args:
-                # We very likely have an XML-based ACL request.
-                body = env['wsgi.input'].readline().decode()
-                translated_acl = swift_acl_translate(body, xml=True)
-                if translated_acl == 'Unsupported':
-                    return get_err_response('Unsupported')
-                elif translated_acl == 'InvalidArgument':
-                    return get_err_response('InvalidArgument')
-                for header, acl in translated_acl:
-                    env[header] = acl
-                env['REQUEST_METHOD'] = 'POST'
+            resp = Response()
+            resp.headers['Location'] = self.container_name
+            resp.status = HTTP_OK
+            return resp
 
-        body_iter = self._app_call(env)
-        status = self._get_status_int()
+        if len(args) > 1:
+            # TODO return kindof error status
+            print 'sb'
+        action = args.keys().pop()
+        if action == 'acl':
+            pass
+        elif action == 'cors':
+            pass
+        elif action == 'lifecycle':
+            pass
+        elif action == 'policy':
+            pass
+        elif action == 'logging':
+            pass
+        elif action == 'notification':
+            pass
+        elif action == 'tagging':
+            pass
+        elif action == 'requestPayment':
+            pass
+        elif action == 'versioning':
+            pass
+        elif action == 'website':
+            pass
+        else:
+            # return a kindof error status
+            pass
 
-        if status != HTTP_CREATED and status != HTTP_NO_CONTENT:
-            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
-                return get_err_response('AccessDenied')
-            elif status == HTTP_ACCEPTED:
-                return get_err_response('BucketAlreadyExists')
-            else:
-                return get_err_response('InvalidURI')
-
-        resp = Response()
-        resp.headers['Location'] = self.container_name
-        resp.status = HTTP_OK
-        return resp
 
     def DELETE(self, env, start_response):
         """
@@ -835,6 +851,7 @@ class Swift3Middleware(object):
         self.logger = get_logger(self.conf, log_route='swift3')
 
     def get_controller(self, env, path):
+        # TODO support container.xx.xx.xx
         container, obj = split_path(path, 0, 2, True)
         d = dict(container_name=container, object_name=obj)
 
