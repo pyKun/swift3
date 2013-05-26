@@ -553,10 +553,24 @@ class BucketController(WSGIContext):
                 # check header access permissions
                 pass
             elif action == 'cors':
-                bodyd = {'CORSConfiguration':{'CORSRule':{
-                    'ExposeHeader':headers['X-Container-Meta-Access-Control-Expose-Headers'],
-                    'AllowedOrigin':headers['X-Container-Meta-Access-Control-Allow-Origin'],
-                    'MaxAgeSeconds':headers['X-Container-Meta-Access-Control-Max-Age']}}}
+                _headers = set(['X-Container-Meta-Access-Control-Expose-Headers',
+                                'X-Container-Meta-Access-Control-Allow-Origin',
+                                'X-Container-Meta-Access-Control-Max-Age'])
+                if not _headers & set(headers):
+                    bodyd = {'CORSConfiguration':{}}
+                else:
+                    bodyd = {'CORSConfiguration':{'CORSRule':{}}}
+                    if 'X-Container-Meta-Access-Control-Expose-Headers' in headers:
+                        bodyd['CORSConfiguration']['CORSRule']['ExposeHeader'] =\
+                                headers['X-Container-Meta-Access-Control-Expose-Headers']
+                    if 'X-Container-Meta-Access-Control-Allow-Origin' in headers:
+                        bodyd['CORSConfiguration']['CORSRule']['AllowedOrigin'] =\
+                                headers['X-Container-Meta-Access-Control-Allow-Origin']
+                    if 'X-Container-Meta-Access-Control-Max-Age' in headers:
+                        bodyd['CORSConfiguration']['CORSRule']['MaxAgeSeconds'] =\
+                                headers['X-Container-Meta-Access-Control-Max-Age']
+
+                #import ipdb;ipdb.set_trace()
                 if is_success(status):
                     return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
@@ -655,10 +669,9 @@ class BucketController(WSGIContext):
             pass
         elif action == 'cors':
             bodyd = xmlbody2dict(env['wsgi.input'].read())
-            print bodyd
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = bodyd['CORSConfiguration']['CORSRule']['AllowedMethod']
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = bodyd['CORSConfiguration']['CORSRule']['MaxAgeSeconds']
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = bodyd['CORSConfiguration']['CORSRule']['ExposeHeader']
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = bodyd['CORSConfiguration']['CORSRule'].get('AllowedMethod', '')
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = bodyd['CORSConfiguration']['CORSRule'].get('MaxAgeSeconds', '')
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = bodyd['CORSConfiguration']['CORSRule'].get('ExposeHeader' ,'')
             env['QUERY_STRING'] = ''
             env['REQUEST_METHOD'] = 'POST'
 
@@ -700,22 +713,62 @@ class BucketController(WSGIContext):
         """
         Handle DELETE Bucket request
         """
-        body_iter = self._app_call(env)
-        status = self._get_status_int()
+        key_args = set(['cors','lifecycle','policy','tagging','website'])
 
-        if status != HTTP_NO_CONTENT:
-            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
-                return get_err_response('AccessDenied')
-            elif status == HTTP_NOT_FOUND:
-                return get_err_response('NoSuchBucket')
-            elif status == HTTP_CONFLICT:
-                return get_err_response('BucketNotEmpty')
+        qs = env.get('QUERY_STRING', '')
+        args = urlparse.parse_qs(qs, 1)
+
+        if not key_args & set(args):
+            # DELETE a Bucket
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+
+            if status != HTTP_NO_CONTENT:
+                if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                elif status == HTTP_NOT_FOUND:
+                    return get_err_response('NoSuchBucket')
+                elif status == HTTP_CONFLICT:
+                    return get_err_response('BucketNotEmpty')
+                else:
+                    return get_err_response('InvalidURI')
+
+            resp = Response()
+            resp.status = HTTP_NO_CONTENT
+            return resp
+        else:
+            # DELETE specified data
+            action = args.keys().pop()
+            if action == 'cors':
+                env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = ''
+                env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = ''
+                env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = ''
+                env['QUERY_STRING'] = ''
+                env['REQUEST_METHOD'] = 'POST'
+
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+
+                if is_success(status):
+                    resp = Response()
+                    resp.status = HTTP_NO_CONTENT
+                    return resp
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
+            elif action == 'lifecycle':
+                pass
+            elif action == 'policy':
+                pass
+            elif action == 'tagging':
+                pass
+            elif action == 'website':
+                pass
             else:
-                return get_err_response('InvalidURI')
+                # return a kindof error status
+                pass
 
-        resp = Response()
-        resp.status = HTTP_NO_CONTENT
-        return resp
 
     def _delete_multiple_objects(self, env):
         def _object_key_iter(xml):
