@@ -285,7 +285,7 @@ def canonical_string(req):
         keywords = sorted(['acl', 'delete', 'lifecycle', 'location', 'logging',
             'notification', 'partNumber', 'policy', 'requestPayment',
             'torrent', 'uploads', 'uploadId', 'versionId', 'versioning',
-            'versions ', 'website'])
+            'versions ', 'website', 'cors'])
         for key in qdict:
             if key in keywords:
                 newstr = key
@@ -310,6 +310,9 @@ def keyvalue2dict(value):
         valued[_key.strip()].append(_value.strip())
     return dict(valued)
 
+
+def xmlbody2dict(xml):
+    return simplexml.loads(xml)
 
 
 def swift_acl_translate(canned=None, acl=None):
@@ -594,7 +597,27 @@ class BucketController(WSGIContext):
             # check header access permissions
             pass
         elif action == 'cors':
-            pass
+            bodyd = xmlbody2dict(env['wsgi.input'].read())
+            print bodyd
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = bodyd['CORSConfiguration']['CORSRule']['AllowedMethod']
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = bodyd['CORSConfiguration']['CORSRule']['MaxAgeSeconds']
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = bodyd['CORSConfiguration']['CORSRule']['ExposeHeader']
+            env['QUERY_STRING'] = ''
+            env['REQUEST_METHOD'] = 'POST'
+
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+
+            if is_success(status):
+                resp = Response()
+                resp.headers['Location'] = self.container_name
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            else:
+                return get_err_response('InvalidURI')
+
         elif action == 'lifecycle':
             pass
         elif action == 'policy':
@@ -885,7 +908,7 @@ class Swift3Middleware(object):
     def handle_request(self, env, start_response):
         req = Request(env)
         self.logger.debug('Calling Swift3 Middleware')
-        self.logger.debug(req.__dict__)
+        #self.logger.debug(req.__dict__)
 
         if 'AWSAccessKeyId' in req.params:
             try:
@@ -916,7 +939,7 @@ class Swift3Middleware(object):
         except ValueError:
             return get_err_response('InvalidURI')(env, start_response)
 
-        print controller
+        print controller, req.method
         if 'Date' in req.headers:
             date = email.utils.parsedate(req.headers['Date'])
             if date is None and 'Expires' in req.params:
