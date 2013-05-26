@@ -315,6 +315,10 @@ def xmlbody2dict(xml):
     return simplexml.loads(xml)
 
 
+def dict2xmlbody(dic):
+    return simplexml.dumps(dic)
+
+
 def swift_acl_translate(canned=None, acl=None):
     """
     Takes an S3 style ACL and returns a list of header/value pairs that
@@ -414,7 +418,7 @@ class ServiceController(WSGIContext):
             return resp
         elif status == HTTP_NO_CONTENT:
             data = {'ListAllMyBucketsResult':{'Owner':{'ID':self.account,'DisplayName':self.account},'Buckets':''}}
-            body = simplexml.dumps(data)
+            body = dict2xmlbody(data)
             return Response(status=HTTP_OK, content_type='application/xml', body=body)
         else:
             raise ValueError('service.GET:unknown swift proxy response status')
@@ -438,98 +442,152 @@ class BucketController(WSGIContext):
         """
         Handle GET Bucket (List Objects) request
         """
-        if 'QUERY_STRING' in env:
-            args = dict(urlparse.parse_qsl(env['QUERY_STRING'], 1))
+        qs = env.get('QUERY_STRING', '')
+        args = urlparse.parse_qs(qs, 1)
+
+        key_args = set(['cors','lifecycle', 'policy', 'logging', 'notification',
+                        'tagging', 'requestPayment', 'versioning', 'versions',
+                        'website', 'location'])
+
+        if not key_args & set(args):
+            # GET bucket to list objects
+            max_keys = MAX_BUCKET_LISTING
+            if 'max-keys' in args:
+                if args.get('max-keys')[0].isdigit() is False:
+                    return get_err_response('InvalidArgument')
+                max_keys = min(int(args.get('max-keys')[0]), MAX_BUCKET_LISTING)
+
+
+            if 'acl' not in args:
+                #acl request sent with format=json etc confuses swift
+                env['QUERY_STRING'] = 'format=json&limit=%s' % (max_keys + 1)
+            if 'marker' in args:
+                env['QUERY_STRING'] += '&marker=%s' % quote(args['marker'])
+            if 'prefix' in args:
+                env['QUERY_STRING'] += '&prefix=%s' % quote(args['prefix'])
+            if 'delimiter' in args:
+                env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            headers = dict(self._response_headers)
+
+            if is_success(status) and 'acl' in args:
+                return get_acl(self.account_name, headers)
+
+            if 'versioning' in args:
+                # Just report there is no versioning configured here.
+                body = ('<VersioningConfiguration '
+                        'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>')
+                return Response(body=body, content_type="text/plain")
+
+            if status != HTTP_OK:
+                if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                elif status == HTTP_NOT_FOUND:
+                    return get_err_response('NoSuchBucket')
+                else:
+                    return get_err_response('InvalidURI')
+
+            if 'location' in args:
+                body = ('<?xml version="1.0" encoding="UTF-8"?>'
+                        '<LocationConstraint '
+                        'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"')
+                if self.location == 'US':
+                    body += '/>'
+                else:
+                    body += ('>%s</LocationConstraint>' % self.location)
+                return Response(body=body, content_type='application/xml')
+
+            if 'logging' in args:
+                # logging disabled
+                body = ('<?xml version="1.0" encoding="UTF-8"?>'
+                        '<BucketLoggingStatus '
+                        'xmlns="http://doc.s3.amazonaws.com/2006-03-01" />')
+                return Response(body=body, content_type='application/xml')
+
+            objects = loads(''.join(list(body_iter)))
+            body = ('<?xml version="1.0" encoding="UTF-8"?>'
+                    '<ListBucketResult '
+                    'xmlns="http://s3.amazonaws.com/doc/2006-03-01">'
+                    '<Prefix>%s</Prefix>'
+                    '<Marker>%s</Marker>'
+                    '<Delimiter>%s</Delimiter>'
+                    '<IsTruncated>%s</IsTruncated>'
+                    '<MaxKeys>%s</MaxKeys>'
+                    '<Name>%s</Name>'
+                    '%s'
+                    '%s'
+                    '</ListBucketResult>' %
+                    (
+                    xml_escape(args.get('prefix', '')),
+                    xml_escape(args.get('marker', '')),
+                    xml_escape(args.get('delimiter', '')),
+                    'true' if max_keys > 0 and len(objects) == (max_keys + 1) else
+                    'false',
+                    max_keys,
+                    xml_escape(self.container_name),
+                    "".join(['<Contents><Key>%s</Key><LastModified>%sZ</LastModif'
+                            'ied><ETag>%s</ETag><Size>%s</Size><StorageClass>STA'
+                            'NDARD</StorageClass><Owner><ID>%s</ID><DisplayName>'
+                            '%s</DisplayName></Owner></Contents>' %
+                            (xml_escape(unquote(i['name'])), i['last_modified'],
+                             i['hash'],
+                             i['bytes'], self.account_name, self.account_name)
+                             for i in objects[:max_keys] if 'subdir' not in i]),
+                    "".join(['<CommonPrefixes><Prefix>%s</Prefix></CommonPrefixes>'
+                             % xml_escape(i['subdir'])
+                             for i in objects[:max_keys] if 'subdir' in i])))
+            return Response(body=body, content_type='application/xml')
         else:
-            args = {}
+            # GET specified data
+            #env['REQUEST_METHOD'] = 'HEAD'
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            headers = dict(self._response_headers)
 
-        if 'max-keys' in args:
-            if args.get('max-keys').isdigit() is False:
-                return get_err_response('InvalidArgument')
+            action = args.keys().pop()
+            if action == 'acl':
+                # TODO this is quite different from swift acl and can't be tested
+                # check body access permissions
+                # check header canner
+                # check header access permissions
+                pass
+            elif action == 'cors':
+                bodyd = {'CORSConfiguration':{'CORSRule':{
+                    'ExposeHeader':headers['X-Container-Meta-Access-Control-Expose-Headers'],
+                    'AllowedOrigin':headers['X-Container-Meta-Access-Control-Allow-Origin'],
+                    'MaxAgeSeconds':headers['X-Container-Meta-Access-Control-Max-Age']}}}
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
 
-        max_keys = min(int(args.get('max-keys', MAX_BUCKET_LISTING)),
-                       MAX_BUCKET_LISTING)
-
-        if 'acl' not in args:
-            #acl request sent with format=json etc confuses swift
-            env['QUERY_STRING'] = 'format=json&limit=%s' % (max_keys + 1)
-        if 'marker' in args:
-            env['QUERY_STRING'] += '&marker=%s' % quote(args['marker'])
-        if 'prefix' in args:
-            env['QUERY_STRING'] += '&prefix=%s' % quote(args['prefix'])
-        if 'delimiter' in args:
-            env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
-        body_iter = self._app_call(env)
-        status = self._get_status_int()
-        headers = dict(self._response_headers)
-
-        if is_success(status) and 'acl' in args:
-            return get_acl(self.account_name, headers)
-
-        if 'versioning' in args:
-            # Just report there is no versioning configured here.
-            body = ('<VersioningConfiguration '
-                    'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>')
-            return Response(body=body, content_type="text/plain")
-
-        if status != HTTP_OK:
-            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
-                return get_err_response('AccessDenied')
-            elif status == HTTP_NOT_FOUND:
-                return get_err_response('NoSuchBucket')
+            elif action == 'lifecycle':
+                pass
+            elif action == 'policy':
+                pass
+            elif action == 'logging':
+                pass
+            elif action == 'notification':
+                pass
+            elif action == 'tagging':
+                pass
+            elif action == 'requestPayment':
+                pass
+            elif action == 'versioning':
+                pass
+            elif action == 'website':
+                pass
+            elif action == 'location':
+                pass
+            elif action == 'versions':
+                pass
             else:
-                return get_err_response('InvalidURI')
+                # return a kindof error status
+                pass
 
-        if 'location' in args:
-            body = ('<?xml version="1.0" encoding="UTF-8"?>'
-                    '<LocationConstraint '
-                    'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"')
-            if self.location == 'US':
-                body += '/>'
-            else:
-                body += ('>%s</LocationConstraint>' % self.location)
-            return Response(body=body, content_type='application/xml')
-
-        if 'logging' in args:
-            # logging disabled
-            body = ('<?xml version="1.0" encoding="UTF-8"?>'
-                    '<BucketLoggingStatus '
-                    'xmlns="http://doc.s3.amazonaws.com/2006-03-01" />')
-            return Response(body=body, content_type='application/xml')
-
-        objects = loads(''.join(list(body_iter)))
-        body = ('<?xml version="1.0" encoding="UTF-8"?>'
-                '<ListBucketResult '
-                'xmlns="http://s3.amazonaws.com/doc/2006-03-01">'
-                '<Prefix>%s</Prefix>'
-                '<Marker>%s</Marker>'
-                '<Delimiter>%s</Delimiter>'
-                '<IsTruncated>%s</IsTruncated>'
-                '<MaxKeys>%s</MaxKeys>'
-                '<Name>%s</Name>'
-                '%s'
-                '%s'
-                '</ListBucketResult>' %
-                (
-                xml_escape(args.get('prefix', '')),
-                xml_escape(args.get('marker', '')),
-                xml_escape(args.get('delimiter', '')),
-                'true' if max_keys > 0 and len(objects) == (max_keys + 1) else
-                'false',
-                max_keys,
-                xml_escape(self.container_name),
-                "".join(['<Contents><Key>%s</Key><LastModified>%sZ</LastModif'
-                        'ied><ETag>%s</ETag><Size>%s</Size><StorageClass>STA'
-                        'NDARD</StorageClass><Owner><ID>%s</ID><DisplayName>'
-                        '%s</DisplayName></Owner></Contents>' %
-                        (xml_escape(unquote(i['name'])), i['last_modified'],
-                         i['hash'],
-                         i['bytes'], self.account_name, self.account_name)
-                         for i in objects[:max_keys] if 'subdir' not in i]),
-                "".join(['<CommonPrefixes><Prefix>%s</Prefix></CommonPrefixes>'
-                         % xml_escape(i['subdir'])
-                         for i in objects[:max_keys] if 'subdir' in i])))
-        return Response(body=body, content_type='application/xml')
 
     def PUT(self, env, start_response):
         """
@@ -588,7 +646,6 @@ class BucketController(WSGIContext):
             print 'sb'
 
         # now args only 1
-        # TODO post to swift proxy
         action = args.keys().pop()
         if action == 'acl':
             # TODO this is quite different from swift acl and can't be tested
