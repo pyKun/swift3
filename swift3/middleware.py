@@ -598,6 +598,7 @@ class BucketController(WSGIContext):
             elif action == 'logging':
                 pass
             elif action == 'notification':
+                # TODO later
                 pass
             elif action == 'tagging':
                 bodyd = {'Tagging':{'TagSet':{}}}
@@ -612,6 +613,7 @@ class BucketController(WSGIContext):
                     return get_err_response('InvalidURI')
 
             elif action == 'requestPayment':
+                # TODO later
                 pass
             elif action == 'versioning':
                 versioning = 'Suspended'
@@ -627,7 +629,9 @@ class BucketController(WSGIContext):
             elif action == 'website':
                 pass
             elif action == 'location':
-                pass
+                body = '<?xml version="1.0" encoding="UTF-8"?>'
+                '<LocationConstraint>China</LocationConstraint>'
+                return Response(status=HTTP_OK, content_type='application/xml', body=body)
             elif action == 'versions':
                 pass
             else:
@@ -742,6 +746,7 @@ class BucketController(WSGIContext):
         elif action == 'logging':
             pass
         elif action == 'notification':
+            # TODO later
             pass
         elif action == 'tagging':
             bodyd = xmlbody2dict(env['wsgi.input'].read())
@@ -761,6 +766,7 @@ class BucketController(WSGIContext):
             else:
                 return get_err_response('InvalidURI')
         elif action == 'requestPayment':
+            # TODO later
             pass
         elif action == 'versioning':
             bodyd = xmlbody2dict(env['wsgi.input'].read())
