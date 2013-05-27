@@ -60,13 +60,14 @@ from xml.dom.minidom import parseString
 from collections import defaultdict
 
 import simplexml
+from lxml import etree
 from simplejson import loads
 import email.utils
 import datetime
 import re
 
 from swift.common.utils import split_path
-from swift.proxy.controller.base import get_container_info
+from swift.proxy.controllers.base import get_container_info
 from swift.common.utils import get_logger
 from swift.common.wsgi import WSGIContext
 from swift.common.swob import Request, Response
@@ -107,7 +108,7 @@ def get_err_response(code):
         (HTTP_NOT_FOUND, 'The specified bucket does not exist'),
         'SignatureDoesNotMatch':
         (HTTP_FORBIDDEN, 'The calculated request signature does not '
-            'match your provided one'),
+        'match your provided one'),
         'RequestTimeTooSkewed':
         (HTTP_FORBIDDEN, 'The difference between the request time and the'
         ' current time is too large'),
@@ -304,6 +305,13 @@ def canonical_string(req):
     return buf + path
 
 
+def create_elem(tag, text):
+    elem = etree.Element(tag)
+    if text:
+        elem.text = text
+    return elem
+
+
 def keyvalue2dict(value):
     valued = defaultdict(list)
     for _pair in value.split(','):
@@ -314,6 +322,14 @@ def keyvalue2dict(value):
 
 def xmlbody2dict(xml):
     return simplexml.loads(xml)
+
+
+def xmlbody2elem(xml):
+    return etree.fromstring(xml)
+
+
+def elem2xmlbody(elem):
+    return etree.tostring(elem, xml_declaration=True)
 
 
 def dict2xmlbody(dic):
@@ -370,6 +386,10 @@ def validate_bucket_name(name):
         return False
     else:
         return True
+
+
+def version_name(name):
+    return '_' + name
 
 
 def is_unique(container):
@@ -557,22 +577,35 @@ class BucketController(WSGIContext):
                 _headers = set(['X-Container-Meta-Access-Control-Expose-Headers',
                                 'X-Container-Meta-Access-Control-Allow-Origin',
                                 'X-Container-Meta-Access-Control-Max-Age'])
-                if not _headers & set(headers):
-                    bodyd = {'CORSConfiguration':{}}
-                else:
-                    bodyd = {'CORSConfiguration':{'CORSRule':{}}}
+                bodye = etree.Element('CORSConfiguration')
+                if _headers & set(headers):
+                    rule = etree.Element('CORSRule')
                     if 'X-Container-Meta-Access-Control-Expose-Headers' in headers:
-                        bodyd['CORSConfiguration']['CORSRule']['ExposeHeader'] =\
-                                headers['X-Container-Meta-Access-Control-Expose-Headers']
+                        valuel = headers['X-Container-Meta-Access-Control-Expose-Headers'].split(',')
+                        for i in valuel:
+                            eh = create_elem('ExposeHeader', i)
+                            rule.append(eh)
                     if 'X-Container-Meta-Access-Control-Allow-Origin' in headers:
-                        bodyd['CORSConfiguration']['CORSRule']['AllowedOrigin'] =\
-                                headers['X-Container-Meta-Access-Control-Allow-Origin']
+                        valuel = headers['X-Container-Meta-Access-Control-Allow-Origin'].split(',')
+                        for i in valuel:
+                            ao = create_elem('AllowedOrigin', i)
+                            rule.append(ao)
                     if 'X-Container-Meta-Access-Control-Max-Age' in headers:
-                        bodyd['CORSConfiguration']['CORSRule']['MaxAgeSeconds'] =\
-                                headers['X-Container-Meta-Access-Control-Max-Age']
+                        valuel = headers['X-Container-Meta-Access-Control-Max-Age'].split(',')
+                        for i in valuel:
+                            ma = create_elem('MaxAgeSeconds', i)
+                            rule.append(ma)
+                    AllowedMethod = ['POST','GET','PUT','DELETE','HEAD']
+                    for i in AllowedMethod:
+                        al = create_elem('AllowedMethod', i)
+                        rule.append(al)
+                    rule.append(create_elem('ID', 'unique_rule'))
+                    bodye.append(rule)
+                else:
+                    bodye.text = ''
 
                 if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                    return Response(status=HTTP_OK, content_type='application/xml', body=elem2xmlbody(bodye))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
                 else:
@@ -594,9 +627,10 @@ class BucketController(WSGIContext):
                     return get_err_response('InvalidURI')
 
             elif action == 'policy':
+                # TODO later
                 pass
             elif action == 'logging':
-                pass
+                return get_err_response('Unsupported')
             elif action == 'notification':
                 # TODO later
                 pass
@@ -633,7 +667,17 @@ class BucketController(WSGIContext):
                 '<LocationConstraint>China</LocationConstraint>'
                 return Response(status=HTTP_OK, content_type='application/xml', body=body)
             elif action == 'versions':
-                pass
+                env['PATH_INFO'] = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(version_name(self.container_name)))
+                env['REQUEST_METHOD'] = 'GET'
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+                # TODO parse body_iter to dict
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
             else:
                 return get_err_response('InvalidURI')
 
@@ -702,10 +746,10 @@ class BucketController(WSGIContext):
             # check header access permissions
             pass
         elif action == 'cors':
-            bodyd = xmlbody2dict(env['wsgi.input'].read())
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = bodyd['CORSConfiguration']['CORSRule'].get('AllowedMethod', '')
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = bodyd['CORSConfiguration']['CORSRule'].get('MaxAgeSeconds', '')
-            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = bodyd['CORSConfiguration']['CORSRule'].get('ExposeHeader' ,'')
+            bodye = xmlbody2elem(env['wsgi.input'].read())
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/AllowedOrigin')])
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/MaxAgeSeconds')])
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/ExposeHeader')])
             env['QUERY_STRING'] = ''
             env['REQUEST_METHOD'] = 'POST'
 
@@ -742,9 +786,10 @@ class BucketController(WSGIContext):
             else:
                 return get_err_response('InvalidURI')
         elif action == 'policy':
+            # TODO later
             pass
         elif action == 'logging':
-            pass
+            return get_err_response('Unsupported')
         elif action == 'notification':
             # TODO later
             pass
@@ -772,7 +817,7 @@ class BucketController(WSGIContext):
             bodyd = xmlbody2dict(env['wsgi.input'].read())
             versioning = bodyd['VersioningConfiguration']['Status']
             env['REQUEST_METHOD'] = 'POST'
-            env['HTTP_X_VERSIONS_LOCATION'] = '_' + self.container_name if versioning == 'Enable' else ''
+            env['HTTP_X_VERSIONS_LOCATION'] = version_name(self.container_name) if versioning == 'Enable' else ''
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
