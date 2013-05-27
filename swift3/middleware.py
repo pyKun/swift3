@@ -570,7 +570,6 @@ class BucketController(WSGIContext):
                         bodyd['CORSConfiguration']['CORSRule']['MaxAgeSeconds'] =\
                                 headers['X-Container-Meta-Access-Control-Max-Age']
 
-                #import ipdb;ipdb.set_trace()
                 if is_success(status):
                     return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
@@ -579,7 +578,20 @@ class BucketController(WSGIContext):
                     return get_err_response('InvalidURI')
 
             elif action == 'lifecycle':
-                pass
+                if 'X-Container-Expiration' in headers:
+                    expir = headers.get('X-Container-Expiration')
+                if expir:
+                    bodyd = {}
+                else:
+                    bodyd = {}
+
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
+
             elif action == 'policy':
                 pass
             elif action == 'logging':
@@ -587,11 +599,30 @@ class BucketController(WSGIContext):
             elif action == 'notification':
                 pass
             elif action == 'tagging':
-                pass
+                bodyd = {'Tagging':{'TagSet':{}}}
+                meta_keys = [header[17:] for header in headers if header.startswith('X-Container-Meta-')]
+                for key in meta_keys:
+                    bodyd['Tagging']['TagSet'][key] = headers['X-Container-Meta-' + key]
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
+
             elif action == 'requestPayment':
                 pass
             elif action == 'versioning':
-                pass
+                versioning = 'Suspended'
+                if 'X-Versions-Location' in headers:
+                    versioning = 'Enable'
+                bodyd = {'VersioningConfiguration':{'Status':versioning}}
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
             elif action == 'website':
                 pass
             elif action == 'location':
@@ -689,7 +720,22 @@ class BucketController(WSGIContext):
                 return get_err_response('InvalidURI')
 
         elif action == 'lifecycle':
-            pass
+            # TODO check versioning
+            bodyd = xmlbody2dict(env['wsgi.input'].read())
+            del_after = bodyd['LifecycleConfiguration']['Rule'].get('Expiration', '')
+            env['REQUEST_METHOD'] = 'POST'
+            env['HTTP_X_CONTAINER_META_EXPIRATION'] = del_after
+            env['QUERY_STRING'] = ''
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            else:
+                return get_err_response('InvalidURI')
         elif action == 'policy':
             pass
         elif action == 'logging':
@@ -697,11 +743,40 @@ class BucketController(WSGIContext):
         elif action == 'notification':
             pass
         elif action == 'tagging':
-            pass
+            bodyd = xmlbody2dict(env['wsgi.input'].read())
+            _key = bodyd['Tagging']['TagSet']['Tag']['Key']
+            _value = bodyd['Tagging']['TagSet']['Tag']['Value']
+            env['REQUEST_METHOD'] = 'POST'
+            env['HTTP_X_CONTAINER_META_%s' % _key] = _value
+            env['QUERY_STRING'] = ''
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            else:
+                return get_err_response('InvalidURI')
         elif action == 'requestPayment':
             pass
         elif action == 'versioning':
-            pass
+            bodyd = xmlbody2dict(env['wsgi.input'].read())
+            versioning = bodyd['VersioningConfiguration']['Status']
+            env['REQUEST_METHOD'] = 'POST'
+            env['HTTP_X_VERSIONS_LOCATION'] = '_' + self.container_name if versioning == 'Enable' else ''
+            env['QUERY_STRING'] = ''
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            else:
+                return get_err_response('InvalidURI')
         elif action == 'website':
             pass
         else:
@@ -758,11 +833,32 @@ class BucketController(WSGIContext):
                 else:
                     return get_err_response('InvalidURI')
             elif action == 'lifecycle':
-                pass
+                env['REQUEST_METHOD'] = 'POST'
+                env['HTTP_X_CONTAINER_META_EXPIRATION'] = ''
+                env['QUERY_STRING'] = ''
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+                if is_success(status):
+                    resp = Response()
+                    resp.status = HTTP_OK
+                    return resp
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
             elif action == 'policy':
                 pass
             elif action == 'tagging':
-                pass
+                # get container info
+                # post all meta empty
+                if is_success(status):
+                    resp = Response()
+                    resp.status = HTTP_NO_CONTENT
+                    return resp
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                else:
+                    return get_err_response('InvalidURI')
             elif action == 'website':
                 pass
             else:
