@@ -66,6 +66,7 @@ import datetime
 import re
 
 from swift.common.utils import split_path
+from swift.proxy.controller.base import get_container_info
 from swift.common.utils import get_logger
 from swift.common.wsgi import WSGIContext
 from swift.common.swob import Request, Response
@@ -630,8 +631,7 @@ class BucketController(WSGIContext):
             elif action == 'versions':
                 pass
             else:
-                # return a kindof error status
-                pass
+                return get_err_response('InvalidURI')
 
 
     def PUT(self, env, start_response):
@@ -687,8 +687,7 @@ class BucketController(WSGIContext):
             return resp
 
         if len(args) > 1:
-            # TODO return kindof error status
-            print 'sb'
+            return get_err_response('InvalidURI')
 
         # now args only 1
         action = args.keys().pop()
@@ -720,7 +719,9 @@ class BucketController(WSGIContext):
                 return get_err_response('InvalidURI')
 
         elif action == 'lifecycle':
-            # TODO check versioning
+            container_info = get_container_info(env, self.app)
+            if container_info['versions']:
+                return get_err_response('AccessDenied')
             bodyd = xmlbody2dict(env['wsgi.input'].read())
             del_after = bodyd['LifecycleConfiguration']['Rule'].get('Expiration', '')
             env['REQUEST_METHOD'] = 'POST'
@@ -780,8 +781,7 @@ class BucketController(WSGIContext):
         elif action == 'website':
             pass
         else:
-            # return a kindof error status
-            pass
+            return get_err_response('InvalidURI')
 
 
     def DELETE(self, env, start_response):
@@ -862,8 +862,7 @@ class BucketController(WSGIContext):
             elif action == 'website':
                 pass
             else:
-                # return a kindof error status
-                pass
+                return get_err_response('InvalidURI')
 
 
     def _delete_multiple_objects(self, env):
