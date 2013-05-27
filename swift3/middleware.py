@@ -612,15 +612,26 @@ class BucketController(WSGIContext):
                     return get_err_response('InvalidURI')
 
             elif action == 'lifecycle':
-                if 'X-Container-Expiration' in headers:
-                    expir = headers.get('X-Container-Expiration')
-                if expir:
-                    bodyd = {}
+                bodye = etree.Element('LifecycleConfiguration')
+                if 'X-Container-Meta-Expiration-Status' in headers:
+                    rule = etree.Element('Rule')
+                    rule.append(create_elem('Status', headers['X-Container-Meta-Expiration-Status']))
+                    if 'X-Container-Meta-Expiration-Prefix' in headers:
+                        rule.append(create_elem('Prefix', headers['X-Container-Meta-Expiration-Prefix']))
+                    if 'X-Container-Meta-Expiration-At' in headers or \
+                       'X-Container-Meta-Expiration-After' in headers:
+                        expir = etree.Element('Expiration')
+                        if 'X-Container-Meta-Expiration-At' in headers:
+                            expir.append(create_elem('Date', headers['X-Container-Meta-Expiration-At']))
+                        if 'X-Container-Meta-Expiration-After' in headers:
+                            expir.append(create_elem('Days', headers['X-Container-Meta-Expiration-After']))
+                        rule.append(expir)
+                    bodye.append(rule)
                 else:
-                    bodyd = {}
+                    bodye.text = ''
 
                 if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                    return Response(status=HTTP_OK, content_type='application/xml', body=elem2xmlbody(bodye))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
                 else:
@@ -767,13 +778,21 @@ class BucketController(WSGIContext):
                 return get_err_response('InvalidURI')
 
         elif action == 'lifecycle':
-            container_info = get_container_info(env, self.app)
-            if container_info['versions']:
-                return get_err_response('AccessDenied')
-            bodyd = xmlbody2dict(env['wsgi.input'].read())
-            del_after = bodyd['LifecycleConfiguration']['Rule'].get('Expiration', '')
+            #container_info = get_container_info(env, self.app)
+            #if container_info['versions']:
+            #   return get_err_response('AccessDenied')
+            bodye = xmlbody2elem(env['wsgi.input'].read())
+
+            at = bodye.xpath('/LifecycleConfiguration/Rule/Expiration/Date')
+            env['HTTP_X_CONTAINER_META_EXPIRATION_AT'] = at[0].text if at else ''
+            after = bodye.xpath('/LifecycleConfiguration/Rule/Expiration/Days')
+            env['HTTP_X_CONTAINER_META_EXPIRATION_AFTER'] = after[0].text if after else ''
+            prefix = bodye.xpath('/LifecycleConfiguration/Rule/Prefix')
+            env['HTTP_X_CONTAINER_META_EXPIRATION_PREFIX'] = prefix[0].text if prefix else ''
+            stat = bodye.xpath('/LifecycleConfiguration/Rule/Status')
+            env['HTTP_X_CONTAINER_META_EXPIRATION_STATUS'] = stat[0].text if stat else ''
+
             env['REQUEST_METHOD'] = 'POST'
-            env['HTTP_X_CONTAINER_META_EXPIRATION'] = del_after
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -884,14 +903,17 @@ class BucketController(WSGIContext):
                 else:
                     return get_err_response('InvalidURI')
             elif action == 'lifecycle':
+                env['HTTP_X_CONTAINER_META_EXPIRATION_AT'] = ''
+                env['HTTP_X_CONTAINER_META_EXPIRATION_AFTER'] = ''
+                env['HTTP_X_CONTAINER_META_EXPIRATION_PREFIX'] = ''
+                env['HTTP_X_CONTAINER_META_EXPIRATION_STATUS'] = ''
                 env['REQUEST_METHOD'] = 'POST'
-                env['HTTP_X_CONTAINER_META_EXPIRATION'] = ''
                 env['QUERY_STRING'] = ''
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
                 if is_success(status):
                     resp = Response()
-                    resp.status = HTTP_OK
+                    resp.status = HTTP_NO_CONTENT
                     return resp
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
