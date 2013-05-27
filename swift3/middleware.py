@@ -325,6 +325,8 @@ def xmlbody2dict(xml):
 
 
 def xmlbody2elem(xml):
+    xmlns = 'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"'
+    xml = xml.replace(xmlns, '')
     return etree.fromstring(xml)
 
 
@@ -411,10 +413,8 @@ class ServiceController(WSGIContext):
         Handle GET Service request
         """
         env['QUERY_STRING'] = 'format=json'
-        print env
         body_iter = self._app_call(env)
         status = self._get_status_int()
-        print body_iter, status
 
         if not is_success(status):
             if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
@@ -661,12 +661,12 @@ class BucketController(WSGIContext):
                 # TODO later
                 pass
             elif action == 'versioning':
-                versioning = 'Suspended'
-                if 'X-Versions-Location' in headers:
-                    versioning = 'Enable'
-                bodyd = {'VersioningConfiguration':{'Status':versioning}}
+                versioning = 'Enabled' if 'X-Versions-Location' in headers else 'Suspended'
+                bodye = etree.Element('VersioningConfiguration')
+                stat = create_elem('Status', versioning)
+                bodye.append(stat)
                 if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                    return Response(status=HTTP_OK, content_type='application/xml', body=elem2xmlbody(bodye))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
                 else:
@@ -778,9 +778,10 @@ class BucketController(WSGIContext):
                 return get_err_response('InvalidURI')
 
         elif action == 'lifecycle':
-            #container_info = get_container_info(env, self.app)
-            #if container_info['versions']:
-            #   return get_err_response('AccessDenied')
+            container_info = get_container_info(env, self.app)
+            if container_info['versions']:
+                return get_err_response('AccessDenied')
+
             bodye = xmlbody2elem(env['wsgi.input'].read())
 
             at = bodye.xpath('/LifecycleConfiguration/Rule/Expiration/Date')
@@ -833,10 +834,13 @@ class BucketController(WSGIContext):
             # TODO later
             pass
         elif action == 'versioning':
-            bodyd = xmlbody2dict(env['wsgi.input'].read())
-            versioning = bodyd['VersioningConfiguration']['Status']
+            bodye = xmlbody2elem(env['wsgi.input'].read())
+            status = bodye.xpath('/VersioningConfiguration/Status')
+            if status:
+                status = status[0].text
+
             env['REQUEST_METHOD'] = 'POST'
-            env['HTTP_X_VERSIONS_LOCATION'] = version_name(self.container_name) if versioning == 'Enable' else ''
+            env['HTTP_X_VERSIONS_LOCATION'] = version_name(self.container_name) if status == 'Enabled' else ''
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
