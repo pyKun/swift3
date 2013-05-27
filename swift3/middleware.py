@@ -58,6 +58,7 @@ from xml.sax.saxutils import escape as xml_escape
 import urlparse
 from xml.dom.minidom import parseString
 from collections import defaultdict
+from copy import copy
 
 import simplexml
 from lxml import etree
@@ -287,7 +288,7 @@ def canonical_string(req):
         keywords = sorted(['acl', 'delete', 'lifecycle', 'location', 'logging',
             'notification', 'partNumber', 'policy', 'requestPayment',
             'torrent', 'uploads', 'uploadId', 'versionId', 'versioning',
-            'versions ', 'website', 'cors'])
+            'versions ', 'website', 'cors', 'tagging'])
         for key in qdict:
             if key in keywords:
                 newstr = key
@@ -646,12 +647,18 @@ class BucketController(WSGIContext):
                 # TODO later
                 pass
             elif action == 'tagging':
-                bodyd = {'Tagging':{'TagSet':{}}}
+                Tagging = etree.Element('Tagging')
+                TagSet = etree.Element('TagSet')
                 meta_keys = [header[17:] for header in headers if header.startswith('X-Container-Meta-')]
                 for key in meta_keys:
-                    bodyd['Tagging']['TagSet'][key] = headers['X-Container-Meta-' + key]
+                    Tag = etree.Element('Tag')
+                    Tag.append(create_elem('Key', key))
+                    Tag.append(create_elem('Value', headers['X-Container-Meta-' + key]))
+                    TagSet.append(Tag)
+                Tagging.append(TagSet)
+
                 if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=dict2xmlbody(bodyd))
+                    return Response(status=HTTP_OK, content_type='application/xml', body=elem2xmlbody(Tagging))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return get_err_response('AccessDenied')
                 else:
@@ -814,17 +821,18 @@ class BucketController(WSGIContext):
             # TODO later
             pass
         elif action == 'tagging':
-            bodyd = xmlbody2dict(env['wsgi.input'].read())
-            _key = bodyd['Tagging']['TagSet']['Tag']['Key']
-            _value = bodyd['Tagging']['TagSet']['Tag']['Value']
+            bodye = xmlbody2elem(env['wsgi.input'].read())
+            for tag in bodye.xpath('/Tagging/TagSet/Tag'):
+                key = tag.xpath('Key')[0].text
+                value = tag.xpath('Value')[0].text
+                env['HTTP_X_CONTAINER_META_%s' % key.upper()] = value
             env['REQUEST_METHOD'] = 'POST'
-            env['HTTP_X_CONTAINER_META_%s' % _key] = _value
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
             if is_success(status):
                 resp = Response()
-                resp.status = HTTP_OK
+                resp.status = HTTP_NO_CONTENT
                 return resp
             elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 return get_err_response('AccessDenied')
@@ -926,8 +934,17 @@ class BucketController(WSGIContext):
             elif action == 'policy':
                 pass
             elif action == 'tagging':
-                # get container info
-                # post all meta empty
+                env2 = copy(env)
+                container_info = get_container_info(env2, self.app)
+                meta_keys = container_info['meta'].keys()
+                for key in meta_keys:
+                    env['HTTP_X_CONTAINER_META_' + key.upper()] = ''
+                env['QUERY_STRING'] = ''
+                env['REQUEST_METHOD'] = 'POST'
+
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+
                 if is_success(status):
                     resp = Response()
                     resp.status = HTTP_NO_CONTENT
