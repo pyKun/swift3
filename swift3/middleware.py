@@ -649,11 +649,11 @@ class BucketController(WSGIContext):
             elif action == 'tagging':
                 Tagging = etree.Element('Tagging')
                 TagSet = etree.Element('TagSet')
-                meta_keys = [header[17:] for header in headers if header.startswith('X-Container-Meta-')]
+                meta_keys = [header[21:] for header in headers if header.startswith('X-Container-Meta-Tag-')]
                 for key in meta_keys:
                     Tag = etree.Element('Tag')
                     Tag.append(create_elem('Key', key))
-                    Tag.append(create_elem('Value', headers['X-Container-Meta-' + key]))
+                    Tag.append(create_elem('Value', headers['X-Container-Meta-Tag-' + key]))
                     TagSet.append(Tag)
                 Tagging.append(TagSet)
 
@@ -825,7 +825,7 @@ class BucketController(WSGIContext):
             for tag in bodye.xpath('/Tagging/TagSet/Tag'):
                 key = tag.xpath('Key')[0].text
                 value = tag.xpath('Value')[0].text
-                env['HTTP_X_CONTAINER_META_%s' % key.upper()] = value
+                env['HTTP_X_CONTAINER_META_TAG_%s' % key.upper()] = value
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
@@ -938,7 +938,7 @@ class BucketController(WSGIContext):
                 container_info = get_container_info(env2, self.app)
                 meta_keys = container_info['meta'].keys()
                 for key in meta_keys:
-                    env['HTTP_X_CONTAINER_META_' + key.upper()] = ''
+                    env['HTTP_X_CONTAINER_META_' + key.replace('-', '_').upper()] = ''
                 env['QUERY_STRING'] = ''
                 env['REQUEST_METHOD'] = 'POST'
 
