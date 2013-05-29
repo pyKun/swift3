@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 # Author: Kun Huang <academicgareth@gmail.com>
-# Created Time: 05/28/13 15:42:55 (CST)
-# Modified Time: 05/28/13 16:50:35 (CST)
 
 
 from collections import defaultdict
@@ -283,3 +281,15 @@ class BaseController(WSGIContext):
                     '</AccessControlPolicy>' %
                     (account_name, account_name, account_name, account_name))
         return Response(body=body, content_type="text/plain")
+
+    def obj_headers_to_amz(self, headers):
+        new_hdrs = {}
+        for key, val in headers.iteritems():
+            _key = key.lower()
+            if _key.startswith('x-object-meta-'):
+                new_hdrs['x-amz-meta-' + key[14:]] = val
+            elif _key in ('content-length', 'content-type',
+                          'content-range', 'content-encoding',
+                          'etag', 'last-modified'):
+                new_hdrs[key] = val
+        return new_hdrs

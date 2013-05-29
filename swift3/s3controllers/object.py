@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 # Author: Kun Huang <academicgareth@gmail.com>
-# Created Time: 05/28/13 15:31:10 (CST)
-# Modified Time: 05/28/13 16:33:05 (CST)
 
 import urlparse
 from urllib import unquote, quote
@@ -10,6 +8,7 @@ from lxml import etree
 
 from swift3.s3controllers.base import BaseController
 from swift.common.wsgi import WSGIContext
+from swift.common.wsgi import make_pre_authed_env as copyenv
 from swift.proxy.controllers.base import get_container_info
 from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
     HTTP_NO_CONTENT, HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, \
@@ -26,24 +25,24 @@ class ObjectController(BaseController):
         WSGIContext.__init__(self, app)
         self.account_name = unquote(account_name)
         self.container_name = unquote(container_name)
+        self.object_name = unquote(object_name)
         env['HTTP_X_AUTH_TOKEN'] = token
         env['PATH_INFO'] = '/v1/AUTH_%s/%s/%s' % (account_name, container_name,
                                                   object_name)
 
     def GETorHEAD(self, env, start_response):
-        if 'QUERY_STRING' in env:
-            args = dict(urlparse.parse_qsl(env['QUERY_STRING'], 1))
-        else:
-            args = {}
+        qs = env.get('QUERY_STRING', '')
+        args = urlparse.parse_qs(qs, 1)
 
-        # Let s3multi handle it.
-        if 'uploadId' in args:
-            return self.app(env, start_response)
-
-        if 'acl' in args:
-            # ACL requests need to make a HEAD call rather than GET
-            env['REQUEST_METHOD'] = 'HEAD'
-            env['SCRIPT_NAME'] = ''
+        if args.get('versionID') or env.get('HTTP_X_AMZ_VERSION_ID'):
+            version_id = args.get('versionID') or env.get('HTTP_X_AMZ_VERSION_ID')
+            location = self.version_name(self.container_name)
+            path = '/v1/AUTH_%s/%s/%s' % (self.account_name, location, version_id)
+            # md5 the versioned object and return the match one
+            #env2 = copyenv(env, method='GET', path=path, query_string='')
+            #app_iter = self._app_call(env2)
+            #status = self._get_status_int()
+            env['PATH_INFO'] = path
             env['QUERY_STRING'] = ''
 
         app_iter = self._app_call(env)
@@ -54,21 +53,7 @@ class ObjectController(BaseController):
             app_iter = None
 
         if is_success(status):
-            if 'acl' in args:
-                # Method must be GET or the body wont be returned to the caller
-                env['REQUEST_METHOD'] = 'GET'
-                return self.get_acl(self.account_name, headers)
-
-            new_hdrs = {}
-            for key, val in headers.iteritems():
-                _key = key.lower()
-                if _key.startswith('x-object-meta-'):
-                    new_hdrs['x-amz-meta-' + key[14:]] = val
-                elif _key in ('content-length', 'content-type',
-                              'content-range', 'content-encoding',
-                              'etag', 'last-modified'):
-                    new_hdrs[key] = val
-            return Response(status=status, headers=new_hdrs, app_iter=app_iter)
+            return Response(status=status, headers=self.obj_headers_to_amz(headers), app_iter=app_iter)
         elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
             return self.get_err_response('AccessDenied')
         elif status == HTTP_NOT_FOUND:
