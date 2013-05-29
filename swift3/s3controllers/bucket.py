@@ -2,7 +2,7 @@
 #-*- coding:utf-8 -*-
 # Author: Kun Huang <academicgareth@gmail.com>
 # Created Time: 05/28/13 15:31:00 (CST)
-# Modified Time: 05/28/13 16:50:31 (CST)
+# Modified Time: 05/29/13 15:38:07 (CST)
 
 
 import urlparse
@@ -429,6 +429,7 @@ class BucketController(BaseController):
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
+            # TODO cheate the versioned container
             if is_success(status):
                 resp = Response()
                 resp.status = HTTP_OK

@@ -77,6 +77,7 @@ class ObjectController(BaseController):
         """
         Handle PUT Object and PUT Object (Copy) request
         """
+        # TODO need check
         for key, value in env.items():
             if key.startswith('HTTP_X_AMZ_META_'):
                 del env[key]
@@ -106,6 +107,7 @@ class ObjectController(BaseController):
             else:
                 return self.get_err_response('InvalidURI')
 
+        # TODO need check
         if 'HTTP_X_COPY_FROM' in env:
             body = '<CopyObjectResult>' \
                    '<ETag>"%s"</ETag>' \
@@ -115,7 +117,7 @@ class ObjectController(BaseController):
         return Response(status=200, etag=self._response_header_value('etag'))
 
     def POST(self, env, start_response):
-        return self.get_err_response('AccessDenied')
+        return self.PUT(env, start_response)
 
     def DELETE(self, env, start_response):
         """
