@@ -34,6 +34,7 @@ class ObjectController(BaseController):
         qs = env.get('QUERY_STRING', '')
         args = urlparse.parse_qs(qs, 1)
 
+        version_id = None
         if args.get('versionId') or env.get('HTTP_X_AMZ_VERSION_ID'):
             version_id = args.get('versionId')[0] or env.get('HTTP_X_AMZ_VERSION_ID')
             if not version_id.endswith('lastest'):
@@ -98,7 +99,20 @@ class ObjectController(BaseController):
                 if env['HTTP_ETAG'] == '':
                     return self.get_err_response('SignatureDoesNotMatch')
             elif key == 'HTTP_X_AMZ_COPY_SOURCE':
-                env['HTTP_X_COPY_FROM'] = value
+                # TODO obj?version_addr should search addr related obj
+                if '?' not in value: # note the quote/unquote
+                    env['HTTP_X_COPY_FROM'] = value
+                else:
+                    c_o, qs = value.split('?', 1)
+                    c_o = '/' + c_o if not c_o.startswith('/') else c_o
+                    tmp = urlparse.parse_qs(qs, 1)
+                    if tmp.get('versionId'):
+                        print c_o
+                        c = self.version_name(c_o.split('/')[1])
+                        o = tmp.get('versionId')[0]
+                        env['HTTP_X_COPY_FROM'] = '/' + c + '/' + o
+                    else:
+                        env['HTTP_X_COPY_FROM'] = c_o
 
         body_iter = self._app_call(env)
         status = self._get_status_int()
