@@ -198,7 +198,7 @@ class Swift3Middleware(object):
         except ValueError:
             return get_err_response('InvalidURI')(env, start_response)
 
-        print controller, req.method
+        #print controller, req.method
         if 'Date' in req.headers:
             date = email.utils.parsedate(req.headers['Date'])
             if date is None and 'Expires' in req.params:

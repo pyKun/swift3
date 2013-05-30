@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 # Author: Kun Huang <academicgareth@gmail.com>
-# Created Time: 05/28/13 15:31:00 (CST)
-# Modified Time: 05/29/13 15:38:07 (CST)
 
 
 import urlparse
@@ -15,6 +13,7 @@ from xml.dom.minidom import parseString
 
 from swift3.s3controllers import BaseController, ObjectController
 from swift.common.wsgi import WSGIContext
+from swift.common.wsgi import make_pre_authed_env as copyenv
 from swift.proxy.controllers.base import get_container_info
 from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
     HTTP_NO_CONTENT, HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, \
@@ -429,8 +428,13 @@ class BucketController(BaseController):
             env['QUERY_STRING'] = ''
             body_iter = self._app_call(env)
             status = self._get_status_int()
-            # TODO cheate the versioned container
-            if is_success(status):
+
+            # TODO create the versioned container
+            path = '/v1/AUTH_%s/%s' % (self.account_name, self.version_name(self.container_name))
+            env2 = copyenv(env, method='PUT', path=path, query_string='')
+            body_iter2 = self._app_call(env2)
+            status2 = self._get_status_int()
+            if is_success(status) and is_success(status2):
                 resp = Response()
                 resp.status = HTTP_OK
                 return resp

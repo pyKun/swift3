@@ -34,10 +34,13 @@ class ObjectController(BaseController):
         qs = env.get('QUERY_STRING', '')
         args = urlparse.parse_qs(qs, 1)
 
-        if args.get('versionID') or env.get('HTTP_X_AMZ_VERSION_ID'):
-            version_id = args.get('versionID') or env.get('HTTP_X_AMZ_VERSION_ID')
-            location = self.version_name(self.container_name)
-            path = '/v1/AUTH_%s/%s/%s' % (self.account_name, location, version_id)
+        if args.get('versionId') or env.get('HTTP_X_AMZ_VERSION_ID'):
+            version_id = args.get('versionId')[0] or env.get('HTTP_X_AMZ_VERSION_ID')
+            if not version_id.endswith('lastest'):
+                location = self.version_name(self.container_name)
+                path = '/v1/AUTH_%s/%s/%s' % (self.account_name, location, version_id)
+            else:
+                path ='/v1/AUTH_%s/%s/%s' % (self.account_name, self.container_name, self.object_name)
             # md5 the versioned object and return the match one
             #env2 = copyenv(env, method='GET', path=path, query_string='')
             #app_iter = self._app_call(env2)
@@ -48,6 +51,9 @@ class ObjectController(BaseController):
         app_iter = self._app_call(env)
         status = self._get_status_int()
         headers = dict(self._response_headers)
+
+        if version_id:
+            headers['x-amz-version-id'] = version_id
 
         if env['REQUEST_METHOD'] == 'HEAD':
             app_iter = None
@@ -108,6 +114,13 @@ class ObjectController(BaseController):
                 return self.get_err_response('InvalidURI')
 
         # TODO need check
+        # 0. copy a different version object
+        # 1. check size < 5GB
+        # 2. no message body
+        # 3.1 header:directive --> fresh metadata
+        # 3.2 .... 3.x
+        # 4 response with source version id and target version id
+        # 5 response with expiration data
         if 'HTTP_X_COPY_FROM' in env:
             body = '<CopyObjectResult>' \
                    '<ETag>"%s"</ETag>' \

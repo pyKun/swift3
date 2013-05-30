@@ -290,6 +290,6 @@ class BaseController(WSGIContext):
                 new_hdrs['x-amz-meta-' + key[14:]] = val
             elif _key in ('content-length', 'content-type',
                           'content-range', 'content-encoding',
-                          'etag', 'last-modified'):
+                          'etag', 'last-modified', 'x-amz-version-id'):
                 new_hdrs[key] = val
         return new_hdrs
