@@ -34,6 +34,9 @@ class ObjectController(BaseController):
         qs = env.get('QUERY_STRING', '')
         args = urlparse.parse_qs(qs, 1)
 
+        if args.get('uploadId'):
+            return self.app(env, start_response)
+
         version_id = None
         if args.get('versionId') or env.get('HTTP_X_AMZ_VERSION_ID'):
             version_id = args.get('versionId')[0] or env.get('HTTP_X_AMZ_VERSION_ID')
