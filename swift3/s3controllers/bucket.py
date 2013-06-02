@@ -151,9 +151,11 @@ class BucketController(BaseController):
                 # check header access permissions
                 return self.get_err_response('Unsupported')
             elif action == 'cors':
+                # get cors
                 _headers = set(['X-Container-Meta-Access-Control-Expose-Headers',
                                 'X-Container-Meta-Access-Control-Allow-Origin',
-                                'X-Container-Meta-Access-Control-Max-Age'])
+                                'X-Container-Meta-Access-Control-Max-Age',
+                                'X-Container-Meta-Access-Control-Allow-Method'])
                 bodye = etree.Element('CORSConfiguration')
                 if _headers & set(headers):
                     rule = etree.Element('CORSRule')
@@ -172,10 +174,11 @@ class BucketController(BaseController):
                         for i in valuel:
                             ma = self.create_elem('MaxAgeSeconds', i)
                             rule.append(ma)
-                    AllowedMethod = ['POST','GET','PUT','DELETE','HEAD']
-                    for i in AllowedMethod:
-                        al = self.create_elem('AllowedMethod', i)
-                        rule.append(al)
+                    if 'X-Container-Meta-Access-Control-Allow-Method' in headers:
+                        valuel = headers['X-Container-Meta-Access-Control-Allow-Method'].split(',')
+                        for i in valuel:
+                            al = self.create_elem('AllowedMethod', i)
+                            rule.append(al)
                     rule.append(self.create_elem('ID', 'unique_rule'))
                     bodye.append(rule)
                 else:
@@ -290,11 +293,13 @@ class BucketController(BaseController):
         qs = env.get('QUERY_STRING', '')
         args = urlparse.parse_qs(qs, 1)
         if not args:
-            # to create a new one
-            if not self.is_unique(self.container_name):
-                # TODO return a error response
-                return
+            if not self.validate_bucket_name(self.container_name):
+                return self.get_err_response('InvalidBucketName')
 
+            if not self.is_unique(self.container_name):
+                return self.get_err_response('BucketAlreadyExists')
+
+            # to create a new one
             if 'HTTP_X_AMZ_ACL' in env:
                 amz_acl = env['HTTP_X_AMZ_ACL']
                 translated_acl = self.swift_acl_translate(canned=amz_acl)
@@ -341,10 +346,12 @@ class BucketController(BaseController):
             # check header access permissions
             pass
         elif action == 'cors':
+            # put cors
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
             env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/AllowedOrigin')])
             env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/MaxAgeSeconds')])
             env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = ','.join([i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/ExposeHeader')])
+            env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_METHOD'] = ','.join(i.text for i in bodye.xpath('/CORSConfiguration/CORSRule/AllowedMethod'))
             env['QUERY_STRING'] = ''
             env['REQUEST_METHOD'] = 'POST'
 
@@ -480,9 +487,11 @@ class BucketController(BaseController):
             # DELETE specified data
             action = args.keys().pop()
             if action == 'cors':
+                # delete cors
                 env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_ORIGIN'] = ''
                 env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_MAX_AGE'] = ''
                 env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_EXPOSE_HEADERS'] = ''
+                env['HTTP_X_CONTAINER_META_ACCESS_CONTROL_ALLOW_METHOD'] = ''
                 env['QUERY_STRING'] = ''
                 env['REQUEST_METHOD'] = 'POST'
 

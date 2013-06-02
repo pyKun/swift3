@@ -43,6 +43,7 @@ class ServiceController(BaseController):
 
         if status == HTTP_OK:
             containers = loads(''.join(list(body_iter)))
+            # TODO use lxml
             # we don't keep the creation time of a backet (s3cmd doesn't
             # work without that) so we use something bogus.
             body = '<?xml version="1.0" encoding="UTF-8"?>' \

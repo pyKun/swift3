@@ -9,6 +9,7 @@ import re
 from lxml import etree
 import simplexml
 
+from swift.common.wsgi import make_pre_authed_env as copyenv
 from swift.common.swob import Request, Response
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
@@ -21,6 +22,8 @@ class BaseController(WSGIContext):
     '''
     Provide some basic useful class.
     '''
+
+    invisible = ['suppersupper']
     def __init__(self):
         pass
 
@@ -152,6 +155,8 @@ class BaseController(WSGIContext):
                       "([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$", name):
             # Bucket names cannot be formatted as an IP Address
             return False
+        elif name in self.invisible:
+            return False
         else:
             return True
 
@@ -162,6 +167,7 @@ class BaseController(WSGIContext):
 
     def is_unique(self, container):
         # TODO checking ...
+        # build another request obj to list all objects
         # use system roor account to create a 'public' container
         # use that container to store all container name
         # return false if there's same name container
