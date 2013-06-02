@@ -257,9 +257,8 @@ class BucketController(BaseController):
             elif action == 'website':
                 pass
             elif action == 'location':
-                body = '<?xml version="1.0" encoding="UTF-8"?>'
-                '<LocationConstraint>China</LocationConstraint>'
-                return Response(status=HTTP_OK, content_type='application/xml', body=body)
+                bodye = self.create_elem('LocationConstraint', 'CN')
+                return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(bodye))
             elif action == 'versions':
                 env['PATH_INFO'] = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(self.version_name(self.container_name)))
                 env['REQUEST_METHOD'] = 'GET'
