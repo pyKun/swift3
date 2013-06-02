@@ -192,10 +192,12 @@ class BucketController(BaseController):
                     return self.get_err_response('InvalidURI')
 
             elif action == 'lifecycle':
+                # get lifecycle
                 bodye = etree.Element('LifecycleConfiguration')
                 if 'X-Container-Meta-Expiration-Status' in headers:
                     rule = etree.Element('Rule')
                     rule.append(self.create_elem('Status', headers['X-Container-Meta-Expiration-Status']))
+                    rule.append(self.create_elem('ID', 'unique_rule'))
                     if 'X-Container-Meta-Expiration-Prefix' in headers:
                         rule.append(self.create_elem('Prefix', headers['X-Container-Meta-Expiration-Prefix']))
                     if 'X-Container-Meta-Expiration-At' in headers or \
@@ -206,6 +208,15 @@ class BucketController(BaseController):
                         if 'X-Container-Meta-Expiration-After' in headers:
                             expir.append(self.create_elem('Days', headers['X-Container-Meta-Expiration-After']))
                         rule.append(expir)
+                    if 'X-Container-Meta-Trans-Class' in headers:
+                        trans = etree.Element('Transition')
+                        cls = self.create_elem('StorageClass', headers['X-Container-Meta-Trans-Class'])
+                        trans.append(cls)
+                        if 'X-Container-Meta-Trans-At' in headers:
+                            trans.append(self.create_elem('Date', headers['X-Container-Meta-Trans-At']))
+                        if 'X-Container-Meta-Trans-After' in headers:
+                            trans.append(self.create_elem('Days', headers['X-Container-Meta-Trans-After']))
+                        rule.append(trans)
                     bodye.append(rule)
                 else:
                     bodye.text = ''
@@ -369,11 +380,19 @@ class BucketController(BaseController):
                 return self.get_err_response('InvalidURI')
 
         elif action == 'lifecycle':
+            # put lifecycle
             container_info = get_container_info(env, self.app)
             if container_info['versions']:
                 return self.get_err_response('AccessDenied')
 
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
+
+            tat = bodye.xpath('/LifecycleConfiguration/Rule/Transition/Date')
+            env['HTTP_X_CONTAINER_META_TRANS_AT'] = tat[0].text if tat else ''
+            tafter = bodye.xpath('/LifecycleConfiguration/Rule/Transition/Days')
+            env['HTTP_X_CONTAINER_META_TRANS_AFTER'] = tafter[0].text if tafter else ''
+            trans = bodye.xpath('/LifecycleConfiguration/Rule/Transition/StorageClass')
+            env['HTTP_X_CONTAINER_META_TRANS_CLASS'] = trans[0].text if trans else ''
 
             at = bodye.xpath('/LifecycleConfiguration/Rule/Expiration/Date')
             env['HTTP_X_CONTAINER_META_EXPIRATION_AT'] = at[0].text if at else ''
@@ -507,6 +526,11 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'lifecycle':
+                # delete lifecycle
+                env['HTTP_X_CONTAINER_META_TRANS_AT'] = ''
+                env['HTTP_X_CONTAINER_META_TRANS_AFTER'] = ''
+                env['HTTP_X_CONTAINER_META_TRANS_CLASS'] = ''
+
                 env['HTTP_X_CONTAINER_META_EXPIRATION_AT'] = ''
                 env['HTTP_X_CONTAINER_META_EXPIRATION_AFTER'] = ''
                 env['HTTP_X_CONTAINER_META_EXPIRATION_PREFIX'] = ''
