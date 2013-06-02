@@ -229,8 +229,19 @@ class BucketController(BaseController):
                     return self.get_err_response('InvalidURI')
 
             elif action == 'policy':
-                # TODO later
-                return self.get_err_response('Unsupported')
+                # get policy
+                json = headers.get('X-Container-Meta-Policy') or ''
+
+                if is_success(status):
+                    if json:
+                        return Response(status=HTTP_OK, content_type='application/json', body=unquote(json))
+                    else:
+                        return self.get_err_response('NotSuchPolicy')
+
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'logging':
                 return self.get_err_response('Unsupported')
             elif action == 'notification':
@@ -419,8 +430,22 @@ class BucketController(BaseController):
             else:
                 return self.get_err_response('InvalidURI')
         elif action == 'policy':
-            # TODO later
-            pass
+            # put policy
+            json = env['wsgi.input'].read()
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            env['HTTP_X_CONTAINER_META_POLICY'] = quote(json)
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            print list(body_iter)
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_NO_CONTENT
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         elif action == 'logging':
             return self.get_err_response('Unsupported')
         elif action == 'notification':
@@ -552,7 +577,20 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'policy':
-                pass
+                # delete policy
+                env['REQUEST_METHOD'] = 'POST'
+                env['QUERY_STRING'] = ''
+                env['HTTP_X_CONTAINER_META_POLICY'] = ''
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+                if is_success(status):
+                    resp = Response()
+                    resp.status = HTTP_NO_CONTENT
+                    return resp
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'tagging':
                 # delete tagging
                 env2 = copy(env)
