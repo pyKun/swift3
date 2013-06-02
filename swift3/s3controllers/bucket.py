@@ -149,7 +149,7 @@ class BucketController(BaseController):
                 # check body access permissions
                 # check header canner
                 # check header access permissions
-                pass
+                return self.get_err_response('Unsupported')
             elif action == 'cors':
                 _headers = set(['X-Container-Meta-Access-Control-Expose-Headers',
                                 'X-Container-Meta-Access-Control-Allow-Origin',
@@ -216,12 +216,12 @@ class BucketController(BaseController):
 
             elif action == 'policy':
                 # TODO later
-                pass
+                return self.get_err_response('Unsupported')
             elif action == 'logging':
                 return self.get_err_response('Unsupported')
             elif action == 'notification':
                 # TODO later
-                pass
+                return self.get_err_response('Unsupported')
             elif action == 'tagging':
                 Tagging = etree.Element('Tagging')
                 TagSet = etree.Element('TagSet')
@@ -242,7 +242,7 @@ class BucketController(BaseController):
 
             elif action == 'requestPayment':
                 # TODO later
-                pass
+                return self.get_err_response('Unsupported')
             elif action == 'versioning':
                 versioning = 'Enabled' if 'X-Versions-Location' in headers else 'Suspended'
                 bodye = etree.Element('VersioningConfiguration')
@@ -255,7 +255,7 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'website':
-                pass
+                return self.get_err_response('Unsupported')
             elif action == 'location':
                 bodye = self.create_elem('LocationConstraint', 'CN')
                 return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(bodye))
@@ -265,6 +265,8 @@ class BucketController(BaseController):
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
                 # TODO parse body_iter to dict
+                # list all container's object as lastest
+                # list all _container's object with versionId
                 if is_success(status):
                     return Response(status=HTTP_OK, content_type='application/xml', body=self.dict2xmlbody(bodyd))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):

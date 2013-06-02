@@ -162,6 +162,10 @@ class BaseController(WSGIContext):
 
     def is_unique(self, container):
         # TODO checking ...
+        # use system roor account to create a 'public' container
+        # use that container to store all container name
+        # return false if there's same name container
+        # return true else
         return True
 
     def get_acl(self, account_name, headers):
