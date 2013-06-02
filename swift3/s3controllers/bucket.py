@@ -243,7 +243,27 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'logging':
-                return self.get_err_response('Unsupported')
+                # get logging
+                target = headers.get('X-Container-Meta-Logging-Target') or ''
+                prefix = headers.get('X-Container-Meta-Logging-Prefix') or ''
+                statuse = etree.Element('BucketLoggingStatus')
+                if target:
+                    enabled = etree.Element('LoggingEnabled')
+                    target_bucket = self.create_elem('TargetBucket', target)
+                    if prefix:
+                        target_prefix = self.create_elem('TargetPrefix', prefix)
+                    enabled.append(target_bucket)
+                    enabled.append(target_prefix)
+                    statuse.append(enabled)
+                else:
+                    pass # set text None
+
+                if is_success(status):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(statuse))
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'notification':
                 # TODO later
                 return self.get_err_response('Unsupported')
@@ -437,17 +457,39 @@ class BucketController(BaseController):
             env['HTTP_X_CONTAINER_META_POLICY'] = quote(json)
             body_iter = self._app_call(env)
             status = self._get_status_int()
-            print list(body_iter)
             if is_success(status):
                 resp = Response()
-                resp.status = HTTP_NO_CONTENT
+                resp.status = HTTP_OK
                 return resp
             elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 return self.get_err_response('AccessDenied')
             else:
                 return self.get_err_response('InvalidURI')
         elif action == 'logging':
-            return self.get_err_response('Unsupported')
+            # put logging
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            bodye = self.xmlbody2elem(env['wsgi.input'].read())
+            target = bodye.xpath('/BucketLoggingStatus/LoggingEnabled/TargetBucket')
+            if target:
+                env['HTTP_X_CONTAINER_META_LOGGING_TARGET'] = target[0].text
+                prefix = bodye.xpath('/BucketLoggingStatus/LoggingEnabled/TargetPrefix')
+                if prefix:
+                    env['HTTP_X_CONTAINER_META_LOGGING_PREFIX'] = prefix[0].text
+            else:
+                env['HTTP_X_CONTAINER_META_LOGGING_TARGET'] = ''
+                env['HTTP_X_CONTAINER_META_LOGGING_PREFIX'] = ''
+
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         elif action == 'notification':
             # TODO later
             pass

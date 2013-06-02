@@ -48,6 +48,8 @@ class BaseController(WSGIContext):
     def xmlbody2elem(self, xml):
         xmlns = 'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"'
         xml = xml.replace(xmlns, '')
+        xmlns = 'xmlns="http://doc.s3.amazonaws.com/2006-03-01"'
+        xml = xml.replace(xmlns, '')
         return etree.fromstring(xml)
 
 
