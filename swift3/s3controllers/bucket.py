@@ -237,16 +237,19 @@ class BucketController(BaseController):
                 # TODO later
                 return self.get_err_response('Unsupported')
             elif action == 'tagging':
+                # get tagging
                 Tagging = etree.Element('Tagging')
                 TagSet = etree.Element('TagSet')
                 meta_keys = [header[21:] for header in headers if header.startswith('X-Container-Meta-Tag-')]
                 for key in meta_keys:
                     Tag = etree.Element('Tag')
-                    Tag.append(self.create_elem('Key', key))
-                    Tag.append(self.create_elem('Value', headers['X-Container-Meta-Tag-' + key]))
+                    keyvalues = headers['X-Container-Meta-Tag-' + key]
+                    _key = keyvalues[:len(key)]
+                    _value = keyvalues[len(key):]
+                    Tag.append(self.create_elem('Key', _key))
+                    Tag.append(self.create_elem('Value', _value))
                     TagSet.append(Tag)
                 Tagging.append(TagSet)
-
                 if is_success(status):
                     return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(Tagging))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
@@ -424,10 +427,11 @@ class BucketController(BaseController):
             # TODO later
             pass
         elif action == 'tagging':
+            # put tagging
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
             for tag in bodye.xpath('/Tagging/TagSet/Tag'):
                 key = tag.xpath('Key')[0].text
-                value = tag.xpath('Value')[0].text
+                value = tag.xpath('Key')[0].text + tag.xpath('Value')[0].text
                 env['HTTP_X_CONTAINER_META_TAG_%s' % key.upper()] = value
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
@@ -550,6 +554,7 @@ class BucketController(BaseController):
             elif action == 'policy':
                 pass
             elif action == 'tagging':
+                # delete tagging
                 env2 = copy(env)
                 container_info = get_container_info(env2, self.app)
                 meta_keys = container_info['meta'].keys()
