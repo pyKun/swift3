@@ -573,7 +573,7 @@ class BucketController(BaseController):
             body = env['wsgi.input'].read()
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_NOTI'] = quote(body)
+            env['HTTP_X_CONTAINER_META_NOTI'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -610,7 +610,7 @@ class BucketController(BaseController):
             body = env['wsgi.input'].read()
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_PAYMENT'] = quote(body)
+            env['HTTP_X_CONTAINER_META_PAYMENT'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -652,7 +652,7 @@ class BucketController(BaseController):
             body = env['wsgi.input'].read()
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+            env['HTTP_X_CONTAINER_META_WEBSITE'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -792,7 +792,7 @@ class BucketController(BaseController):
                 body = env['wsgi.input'].read()
                 env['REQUEST_METHOD'] = 'POST'
                 env['QUERY_STRING'] = ''
-                env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+                env['HTTP_X_CONTAINER_META_WEBSITE'] = quote(body)
 
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
