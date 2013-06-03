@@ -96,6 +96,8 @@ class BaseController(WSGIContext):
             (HTTP_NOT_FOUND, 'The resource you requested does not exist'),
             'NotSuchPolicy':
             (HTTP_NOT_FOUND, 'The Policy you requested does not exist'),
+            'NotSuchWebsite':
+            (HTTP_NOT_FOUND, 'The Website you requested does not exist'),
             'Unsupported':
             (HTTP_NOT_IMPLEMENTED, 'The feature you requested is not yet'
             ' implemented'),

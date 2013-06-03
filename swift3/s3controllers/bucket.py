@@ -145,11 +145,20 @@ class BucketController(BaseController):
 
             action = args.keys().pop()
             if action == 'acl':
-                # TODO this is quite different from swift acl and can't be tested
-                # check body access permissions
-                # check header canner
-                # check header access permissions
-                return self.get_err_response('Unsupported')
+                # get acl
+                # get policy
+                acl = headers.get('X-Container-Meta-Policy') or ''
+
+                if is_success(status):
+                    if acl:
+                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(acl))
+                    else:
+                        return self.get_err_response('NotSuchPolicy')
+
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'cors':
                 # get cors
                 _headers = set(['X-Container-Meta-Access-Control-Expose-Headers',
@@ -265,8 +274,18 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'notification':
-                # TODO later
-                return self.get_err_response('Unsupported')
+                # get it
+                noti = headers.get('X-Container-Meta-Noti')
+                if is_success(status):
+                    if noti:
+                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(noti))
+                    else:
+                        return self.get_err_response('NotSuchWebsite')
+
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'tagging':
                 # get tagging
                 Tagging = etree.Element('Tagging')
@@ -289,8 +308,18 @@ class BucketController(BaseController):
                     return self.get_err_response('InvalidURI')
 
             elif action == 'requestPayment':
-                # TODO later
-                return self.get_err_response('Unsupported')
+                # get it
+                pay = headers.get('X-Container-Meta-Payment')
+                if is_success(status):
+                    if pay:
+                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(pay))
+                    else:
+                        return self.get_err_response('NotSuchWebsite')
+
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'versioning':
                 versioning = 'Enabled' if 'X-Versions-Location' in headers else 'Suspended'
                 bodye = etree.Element('VersioningConfiguration')
@@ -303,7 +332,18 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'website':
-                return self.get_err_response('Unsupported')
+                # get website
+                website = headers.get('X-Container-Meta-Website')
+                if is_success(status):
+                    if website:
+                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(website))
+                    else:
+                        return self.get_err_response('NotSuchWebsite')
+
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             elif action == 'location':
                 bodye = self.create_elem('LocationConstraint', 'CN')
                 return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(bodye))
@@ -312,6 +352,7 @@ class BucketController(BaseController):
                 env['REQUEST_METHOD'] = 'GET'
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
+                env2 = copyenv(env, method='PUT', path=path, query_string='')
                 # TODO parse body_iter to dict
                 # list all container's object as lastest
                 # list all _container's object with versionId
@@ -385,11 +426,21 @@ class BucketController(BaseController):
         # now args only 1
         action = args.keys().pop()
         if action == 'acl':
-            # TODO this is quite different from swift acl and can't be tested
-            # check body access permissions
-            # check header canner
-            # check header access permissions
-            pass
+            # put acl
+            acl = env['wsgi.input'].read()
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            env['HTTP_X_CONTAINER_META_ACL'] = quote(acl)
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         elif action == 'cors':
             # put cors
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
@@ -491,8 +542,23 @@ class BucketController(BaseController):
             else:
                 return self.get_err_response('InvalidURI')
         elif action == 'notification':
-            # TODO later
-            pass
+            # put it
+            body = env['wsgi.input'].read()
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            env['HTTP_CONTAINER_META_NOTI'] = quote(body)
+
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         elif action == 'tagging':
             # put tagging
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
@@ -513,8 +579,23 @@ class BucketController(BaseController):
             else:
                 return self.get_err_response('InvalidURI')
         elif action == 'requestPayment':
-            # TODO later
-            pass
+            # put it
+            body = env['wsgi.input'].read()
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            env['HTTP_CONTAINER_META_PAYMENT'] = quote(body)
+
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         elif action == 'versioning':
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
             status = bodye.xpath('/VersioningConfiguration/Status')
@@ -527,7 +608,6 @@ class BucketController(BaseController):
             body_iter = self._app_call(env)
             status = self._get_status_int()
 
-            # TODO create the versioned container
             path = '/v1/AUTH_%s/%s' % (self.account_name, self.version_name(self.container_name))
             env2 = copyenv(env, method='PUT', path=path, query_string='')
             body_iter2 = self._app_call(env2)
@@ -541,7 +621,23 @@ class BucketController(BaseController):
             else:
                 return self.get_err_response('InvalidURI')
         elif action == 'website':
-            pass
+            # put website
+            body = env['wsgi.input'].read()
+            env['REQUEST_METHOD'] = 'POST'
+            env['QUERY_STRING'] = ''
+            env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+
+            if is_success(status):
+                resp = Response()
+                resp.status = HTTP_OK
+                return resp
+            elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return self.get_err_response('AccessDenied')
+            else:
+                return self.get_err_response('InvalidURI')
         else:
             return self.get_err_response('InvalidURI')
 
@@ -655,7 +751,23 @@ class BucketController(BaseController):
                 else:
                     return self.get_err_response('InvalidURI')
             elif action == 'website':
-                pass
+                # delete website
+                body = env['wsgi.input'].read()
+                env['REQUEST_METHOD'] = 'POST'
+                env['QUERY_STRING'] = ''
+                env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+
+                if is_success(status):
+                    resp = Response()
+                    resp.status = HTTP_OK
+                    return resp
+                elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return self.get_err_response('AccessDenied')
+                else:
+                    return self.get_err_response('InvalidURI')
             else:
                 return self.get_err_response('InvalidURI')
 
