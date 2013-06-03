@@ -66,6 +66,8 @@ class BucketController(BaseController):
             if 'delimiter' in args:
                 env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
             body_iter = self._app_call(env)
+            if env['REQUEST_METHOD'] == 'HEAD':
+                body_iter = ''
             status = self._get_status_int()
             headers = dict(self._response_headers)
 
@@ -910,3 +912,6 @@ class BucketController(BaseController):
 
 
         return self.get_err_response('Unsupported')
+
+    def HEAD(self, env, start_response):
+        return self.GET(env, start_response)
