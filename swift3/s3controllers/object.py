@@ -167,3 +167,6 @@ class ObjectController(BaseController):
         resp = Response()
         resp.status = HTTP_NO_CONTENT
         return resp
+
+    def OPTIONS(self, env, start_response):
+        return self.HEAD(env, start_response)
