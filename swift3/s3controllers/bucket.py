@@ -680,6 +680,16 @@ class BucketController(BaseController):
 
         if not key_args & set(args):
             # DELETE a Bucket
+            version = args.get('versionId')
+            if version:
+                vid = version[0]
+                if vid.lower() == 'lastest':
+                    pass
+                else:
+                    env['PATH_INFO'] = '/v1/AUTH_%s/%s/%s' % (quote(self.account_name),
+                                                              quote(self.version_name(self.container_name)),
+                                                              vid)
+
             body_iter = self._app_call(env)
             status = self._get_status_int()
 
