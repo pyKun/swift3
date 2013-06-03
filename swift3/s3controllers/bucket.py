@@ -66,6 +66,8 @@ class BucketController(BaseController):
             if 'delimiter' in args:
                 env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
             body_iter = self._app_call(env)
+            if env['REQUEST_METHOD'] == 'HEAD':
+                body_iter = ''
             status = self._get_status_int()
             headers = dict(self._response_headers)
 
@@ -369,16 +371,43 @@ class BucketController(BaseController):
                 bodye = self.create_elem('LocationConstraint', 'CN')
                 return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(bodye))
             elif action == 'versions':
-                env['PATH_INFO'] = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(self.version_name(self.container_name)))
-                env['REQUEST_METHOD'] = 'GET'
+                # get versions container
+                path = '/v1/AUTH_%s/%s' % (self.account_name, self.container_name)
+                env = copyenv(env, method='GET', path=path, query_string='')
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
-                env2 = copyenv(env, method='PUT', path=path, query_string='')
-                # TODO parse body_iter to dict
-                # list all container's object as lastest
-                # list all _container's object with versionId
-                if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=self.dict2xmlbody(bodyd))
+
+                # get origin container
+                path = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(self.version_name(self.container_name)))
+                env2 = copyenv(env, method='GET', path=path, query_string='')
+                body_iter2 = self._app_call(env2)
+                status2 = self._get_status_int()
+
+                last = list(body_iter)
+                history = list(body_iter2)
+                res = etree.Element('ListVersionsResult')
+                bucket = self.create_elem('Name', self.container_name)
+                res.append(bucket)
+                if last:
+                    last = [i for i in last[0].split('\n') if i]
+                    for i in last:
+                        ver = etree.Element('Version')
+                        ver.append(self.create_elem('Key', i))
+                        ver.append(self.create_elem('VersionId', 'lastest'))
+                        ver.append(self.create_elem('IsLastest', 'true'))
+                        res.append(ver)
+
+                if history:
+                    history = [i for i in history[0].split('\n') if i]
+                    for i in history:
+                        ver = etree.Element('Version')
+                        ver.append(self.create_elem('Key', i.split('/')[0][3:]))
+                        ver.append(self.create_elem('VersionId', i.split('/')[1]))
+                        ver.append(self.create_elem('IsLastest', 'false'))
+                        res.append(ver)
+
+                if is_success(status) and is_success(status2):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(res))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return self.get_err_response('AccessDenied')
                 else:
@@ -572,8 +601,11 @@ class BucketController(BaseController):
 
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
+
             env['HTTP_CONTAINER_META_NOTI_TOPIC'] = topic[0].text
             env['HTTP_CONTAINER_META_NOTI_EVENT'] = event[0].text
+
+            env['HTTP_X_CONTAINER_META_NOTI'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -616,7 +648,8 @@ class BucketController(BaseController):
                 
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_X_CONTAINER_META_PAYMENT'] = target[0].text
+
+            env['HTTP_X_CONTAINER_META_PAYMENT'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -660,8 +693,8 @@ class BucketController(BaseController):
 
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            # set fake data
-            env['HTTP_X_CONTAINER_META_WEBSITE'] = 'true'
+
+            env['HTTP_X_CONTAINER_META_WEBSITE'] = quote(body)
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -689,6 +722,16 @@ class BucketController(BaseController):
 
         if not key_args & set(args):
             # DELETE a Bucket
+            version = args.get('versionId')
+            if version:
+                vid = version[0]
+                if vid.lower() == 'lastest':
+                    pass
+                else:
+                    env['PATH_INFO'] = '/v1/AUTH_%s/%s/%s' % (quote(self.account_name),
+                                                              quote(self.version_name(self.container_name)),
+                                                              vid)
+
             body_iter = self._app_call(env)
             status = self._get_status_int()
 
@@ -871,7 +914,7 @@ class BucketController(BaseController):
         else:
             args = {}
 
-        if 'delete' in args:
+        if 'delete2' in args:
             return self._delete_multiple_objects(env)
 
         if 'uploads' in args:
@@ -882,4 +925,33 @@ class BucketController(BaseController):
             # Pass it through, the s3multi upload helper will handle it.
             return self.app(env, start_response)
 
+        if 'delete' in args:
+            bodye = self.xmlbody2elem(env['wsgi.input'].read())
+            keys = bodye.xpath('/Delete/Object')
+            res = etree.Element('DeleteResult')
+            for key in keys:
+                path = '/v1/AUTH_%s/%s/%s' % (quote(self.account_name),
+                                              quote(self.container_name),
+                                              quote(key.xpath('Key')[0].text))
+                if key.xpath('VersionId'):
+                    vid = key.xpath('VersionId')[0].text
+                    path = path + '?versionId=' + vid
+                env = copyenv(env, method='DELETE', path=path, query_string='')
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+                if is_success(status):
+                    delete = etree.Element('Deleted')
+                    delete.append(self.create_elem('Key',key.xpath('Key')[0].text))
+                    res.append(delete)
+                else:
+                    err = etree.Element('Error')
+                    err.append(self.create_elem('Key',key.xpath('Key')[0].text))
+                    res.append(err)
+
+            return Response(status=HTTP_OK, body=self.elem2xmlbody(res))
+
+
         return self.get_err_response('Unsupported')
+
+    def HEAD(self, env, start_response):
+        return self.GET(env, start_response)
