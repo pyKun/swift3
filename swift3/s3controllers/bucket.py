@@ -872,7 +872,7 @@ class BucketController(BaseController):
         else:
             args = {}
 
-        if 'delete' in args:
+        if 'delete2' in args:
             return self._delete_multiple_objects(env)
 
         if 'uploads' in args:
@@ -882,5 +882,31 @@ class BucketController(BaseController):
         if 'uploadId' in args:
             # Pass it through, the s3multi upload helper will handle it.
             return self.app(env, start_response)
+
+        if 'delete' in args:
+            bodye = self.xmlbody2elem(env['wsgi.input'].read())
+            keys = bodye.xpath('/Delete/Object')
+            res = etree.Element('DeleteResult')
+            for key in keys:
+                path = '/v1/AUTH_%s/%s/%s' % (quote(self.account_name),
+                                              quote(self.container_name),
+                                              quote(key.xpath('Key')[0].text))
+                if key.xpath('VersionId'):
+                    vid = key.xpath('VersionId')[0].text
+                    path = path + '?versionId=' + vid
+                env = copyenv(env, method='DELETE', path=path, query_string='')
+                body_iter = self._app_call(env)
+                status = self._get_status_int()
+                if is_success(status):
+                    delete = etree.Element('Deleted')
+                    delete.append(self.create_elem('Key',key.xpath('Key')[0].text))
+                    res.append(delete)
+                else:
+                    err = etree.Element('Error')
+                    err.append(self.create_elem('Key',key.xpath('Key')[0].text))
+                    res.append(err)
+
+            return Response(status=HTTP_OK, body=self.elem2xmlbody(res))
+
 
         return self.get_err_response('Unsupported')
