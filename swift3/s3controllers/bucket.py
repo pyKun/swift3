@@ -348,16 +348,43 @@ class BucketController(BaseController):
                 bodye = self.create_elem('LocationConstraint', 'CN')
                 return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(bodye))
             elif action == 'versions':
-                env['PATH_INFO'] = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(self.version_name(self.container_name)))
-                env['REQUEST_METHOD'] = 'GET'
+                # get versions container
+                path = '/v1/AUTH_%s/%s' % (self.account_name, self.container_name)
+                env = copyenv(env, method='GET', path=path, query_string='')
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
-                env2 = copyenv(env, method='PUT', path=path, query_string='')
-                # TODO parse body_iter to dict
-                # list all container's object as lastest
-                # list all _container's object with versionId
-                if is_success(status):
-                    return Response(status=HTTP_OK, content_type='application/xml', body=self.dict2xmlbody(bodyd))
+
+                # get origin container
+                path = '/v1/AUTH_%s/%s' % (quote(self.account_name), quote(self.version_name(self.container_name)))
+                env2 = copyenv(env, method='GET', path=path, query_string='')
+                body_iter2 = self._app_call(env2)
+                status2 = self._get_status_int()
+
+                last = list(body_iter)
+                history = list(body_iter2)
+                res = etree.Element('ListVersionsResult')
+                bucket = self.create_elem('Name', self.container_name)
+                res.append(bucket)
+                if last:
+                    last = [i for i in last[0].split('\n') if i]
+                    for i in last:
+                        ver = etree.Element('Version')
+                        ver.append(self.create_elem('Key', i))
+                        ver.append(self.create_elem('VersionId', 'lastest'))
+                        ver.append(self.create_elem('IsLastest', 'true'))
+                        res.append(ver)
+
+                if history:
+                    history = [i for i in history[0].split('\n') if i]
+                    for i in history:
+                        ver = etree.Element('Version')
+                        ver.append(self.create_elem('Key', i.split('/')[0][3:]))
+                        ver.append(self.create_elem('VersionId', i.split('/')[1]))
+                        ver.append(self.create_elem('IsLastest', 'false'))
+                        res.append(ver)
+
+                if is_success(status) and is_success(status2):
+                    return Response(status=HTTP_OK, content_type='application/xml', body=self.elem2xmlbody(res))
                 elif status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                     return self.get_err_response('AccessDenied')
                 else:
