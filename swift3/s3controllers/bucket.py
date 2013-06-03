@@ -275,10 +275,19 @@ class BucketController(BaseController):
                     return self.get_err_response('InvalidURI')
             elif action == 'notification':
                 # get it
-                noti = headers.get('X-Container-Meta-Noti')
+                topic = headers.get('X-Container-Meta-Noti-Topic')
+                event = headers.get('X-Container-Meta-Noti-Event')
                 if is_success(status):
-                    if noti:
-                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(noti))
+                    if topic:
+                        body = ('<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                                '<NotificationConfiguration> '
+                                '<TopicConfiguration>'
+                                '<Topic>%s</Topic>'
+                                '<Event>%s</Event>'
+                                '</TopicConfiguration>'
+                                '</NotificationConfiguration>',
+                                topic, event)
+                        return Response(status=HTTP_OK, content_type='application/xml', body=body)
                     else:
                         return self.get_err_response('NotSuchWebsite')
 
@@ -309,7 +318,8 @@ class BucketController(BaseController):
 
             elif action == 'requestPayment':
                 # get it
-                pay = headers.get('X-Container-Meta-Payment')
+                # default value is BucketOwner
+                pay = headers.get('X-Container-Meta-Payment', 'BucketOwner')
                 if is_success(status):
                     if pay:
                         return Response(status=HTTP_OK, content_type='application/xml', body=unquote(pay))
@@ -320,6 +330,7 @@ class BucketController(BaseController):
                     return self.get_err_response('AccessDenied')
                 else:
                     return self.get_err_response('InvalidURI')
+
             elif action == 'versioning':
                 versioning = 'Enabled' if 'X-Versions-Location' in headers else 'Suspended'
                 bodye = etree.Element('VersioningConfiguration')
@@ -334,9 +345,19 @@ class BucketController(BaseController):
             elif action == 'website':
                 # get website
                 website = headers.get('X-Container-Meta-Website')
+                fake = ('<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                        '<IndexDocument>'
+                        '<Suffix>index.html</Suffix>'
+                        '</IndexDocument>'
+                        '<ErrorDocument>'
+                        '<Key>SomeErrorDocument.html</Key>'
+                        '</ErrorDocument>'
+                        '</WebsiteConfiguration>')
+
                 if is_success(status):
                     if website:
-                        return Response(status=HTTP_OK, content_type='application/xml', body=unquote(website))
+                        # return fake data
+                        return Response(status=HTTP_OK, content_type='application/xml', body=fake)
                     else:
                         return self.get_err_response('NotSuchWebsite')
 
@@ -543,10 +564,16 @@ class BucketController(BaseController):
                 return self.get_err_response('InvalidURI')
         elif action == 'notification':
             # put it
-            body = env['wsgi.input'].read()
+            bodye = self.xmlbody2elem(env['wsgi.input'].read())
+            topic = bodye.xpath('/NotificationConfiguration/TopicConfiguration/Topic')
+            event = bodye.xpath('/NotificationConfiguration/TopicConfiguration/Event')
+            if not topic or not event:
+                return self.get_err_response('InvalidArgument')
+
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_NOTI'] = quote(body)
+            env['HTTP_CONTAINER_META_NOTI_TOPIC'] = topic[0].text
+            env['HTTP_CONTAINER_META_NOTI_EVENT'] = event[0].text
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -578,12 +605,18 @@ class BucketController(BaseController):
                 return self.get_err_response('AccessDenied')
             else:
                 return self.get_err_response('InvalidURI')
+
         elif action == 'requestPayment':
             # put it
-            body = env['wsgi.input'].read()
+            bodye = self.xmlbody2elem(env['wsgi.input'].read())
+            target = bodye.xpath('/RequestPaymentConfiguration/Payer')
+
+            if not target or target[0].text not in ('BucketOwner', 'Requester'):
+                return self.get_err_response('InvalidArgument')
+                
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_PAYMENT'] = quote(body)
+            env['HTTP_X_CONTAINER_META_PAYMENT'] = target[0].text
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -596,6 +629,7 @@ class BucketController(BaseController):
                 return self.get_err_response('AccessDenied')
             else:
                 return self.get_err_response('InvalidURI')
+
         elif action == 'versioning':
             bodye = self.xmlbody2elem(env['wsgi.input'].read())
             status = bodye.xpath('/VersioningConfiguration/Status')
@@ -623,9 +657,11 @@ class BucketController(BaseController):
         elif action == 'website':
             # put website
             body = env['wsgi.input'].read()
+
             env['REQUEST_METHOD'] = 'POST'
             env['QUERY_STRING'] = ''
-            env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+            # set fake data
+            env['HTTP_X_CONTAINER_META_WEBSITE'] = 'true'
 
             body_iter = self._app_call(env)
             status = self._get_status_int()
@@ -755,7 +791,7 @@ class BucketController(BaseController):
                 body = env['wsgi.input'].read()
                 env['REQUEST_METHOD'] = 'POST'
                 env['QUERY_STRING'] = ''
-                env['HTTP_CONTAINER_META_WEBSITE'] = quote(body)
+                env['HTTP_X_CONTAINER_META_WEBSITE'] = quote(body)
 
                 body_iter = self._app_call(env)
                 status = self._get_status_int()
